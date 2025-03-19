@@ -142,7 +142,7 @@ class Surface:
         sage: cone = NE_SubdivisionCone.representative(S,'B(0)'); cone
         1-d cone in 5-d lattice N
         sage: collection = CylinderList(cylinders)
-        sage: covering = collection.make_polar_on(cone).reduce()
+        sage: covering = collection.get_polar_on(cone).reduce()
     '''
     def __init__(self, degree:int, dependencies: WeakDependencies|None=None, extra:dict[str,str]|None=None) -> None:
         '''
@@ -312,15 +312,15 @@ class Surface:
         return curve
 
     #TODO move to class Curve?
-    def _curve_name(self, curve:'Curve') -> str:
-        #print('naming curve ', curve)
-        if curve in self._curve_names.keys() and curve in self.minus_one_curves+self.minus_two_curves:
-            return self._curve_names[curve]
-        else:
-            return str(curve)
+    # def _curve_name(self, curve:'Curve') -> str:
+    #     #print('naming curve ', curve)
+    #     if curve in self._curve_names.keys() and curve in self.minus_one_curves+self.minus_two_curves:
+    #         return self._curve_names[curve]
+    #     else:
+    #         return str(curve)
 
-    def _curves_name(self, curves:Sequence['Curve']) -> str:
-        return ', '.join([self._curve_name(c) for c in curves])#print('naming curve ', curve)
+    # def _curves_name(self, curves:Sequence['Curve']) -> str:
+    #     return ', '.join([self._curve_name(c) for c in curves])#print('naming curve ', curve)
 
     @cached_property
     def minus_two_curves(self) -> list['Curve']:
@@ -383,7 +383,7 @@ class Surface:
     def Ample(self):
         return self.dual_cone(self.NE.cone)
 
-    def disjoint_subsets(self, curves:list, maximal_only:bool=False) -> Generator[Curve]:
+    def disjoint_subsets(self, curves:list[Curve], maximal_only:bool=False) -> Generator[Curve]:
         '''
         return subsets of curves that are pairwise disjoint and disjoint with ones in independent_with
 
@@ -594,11 +594,18 @@ class Contraction():
 
 
 class Curve(ToricLatticeElement):
-    #pass #TODO find a reasonable implementation
-    # TODO make immutable    
+    #TODO should be a bubble class with a single curve in its linear system
     def __init__(self, coordinates, name:str|None=None):
+        """
+        Initialize a Curve object with given coordinates and an optional name.
+
+        INPUT:
+            coordinates: The coordinates representing the curve.
+            name (str, optional): The name of the curve. Defaults to None.
+        """
         super().__init__(coordinates)
         self.name = name
+        self.set_immutable()
     #components = []
 
     def __mul__(self, other:'Curve') -> int:

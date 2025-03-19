@@ -6,9 +6,9 @@ def test_S5_covering():
     cylinders = [c for c in CylinderGenerator.all_cylinders(S,constructions)]
     total_collection = CylinderList(cylinders)
     cones = [c for c in NE_SubdivisionCone.representatives(S)]
-    cone = NE_SubdivisionCone.representative(S,'B(0)')
+    cone = NE_SubdivisionCone.representative(S,'B(0)').cone
     collection = CylinderList(cylinders)
-    covering = collection.make_polar_on(cones[1 ]).reduce()
+    covering = collection.get_polar_on(cones[1].cone).reduce()
     assert len(covering) == 5 
     return covering
 
@@ -25,17 +25,17 @@ def test_S3_tangent_covering():
     for i in range(1, 7):
         t = f'B({i})'
         cone = NE_SubdivisionCone.representative(S, t).cone
-        assert len(collection.make_polar_on(cone).reduce())>0 
+        assert len(collection.get_polar_on(cone).reduce())>0 
     cone = NE_SubdivisionCone.representative(S, 'B(0)').cone
-    assert len(collection.make_polar_on(cone).reduce())==0 
+    assert len(collection.get_polar_on(cone).reduce())==0 
 
 def test_S3_cover_anticanonical():
     S = Surface(3)
     constructions = ['P1xP1', 'lines', 'tangent']
     cylinders = [c for c in CylinderGenerator.all_cylinders(S, constructions)]
-    cone = NE_SubdivisionCone.representative(S,'B(0)')
+    cone = NE_SubdivisionCone.representative(S,'B(0)').cone
     collection = CylinderList(cylinders)
-    covering = collection.make_polar_on(cone)
+    covering = collection.get_polar_on(cone)
     assert len(covering) == 0
 
 

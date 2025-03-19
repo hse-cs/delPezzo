@@ -27,16 +27,19 @@ def generate_surface(line: str) -> Surface:
     dependencies = WeakDependencies(collinear_triples=collinear_triples, infinitesimal_chains=infinitesimal_chains, sixs_on_conic=sixs_on_conic, cusp_cubics=cusp_cubics)
     return Surface(9-int(rank), dependencies=dependencies, extra=extra)
 
+def Lubbes_lines() -> list[str]:
+    with resources.files("delPezzo").joinpath("Lubbes_list.txt").open() as file: 
+        lines = file.readlines()
+    return lines
+
 def generate_surfaces(degree:int) -> Generator[Surface, None, None]:
     results = []
     pattern_list = r"\[\d+(?:[ \t]*,[ \t]*\d+)+\]"
-    with resources.files("delPezzo").joinpath("Lubbes_list.txt").open() as file: 
-        lines = file.readlines()
-        for line in lines:
-            _, rank, _ = line.strip().split(' ',2)
-            if rank != str(9-degree):
-                continue
-            yield generate_surface(line)
+    for line in Lubbes_lines():
+        _, rank, _ = line.strip().split(' ',2)
+        if rank != str(9-degree):
+            continue
+        yield generate_surface(line)
                 
 
 if __name__ == "__main__":

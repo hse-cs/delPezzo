@@ -10,7 +10,7 @@ def test_ParkWon_B():
     S = Surface(4)
     
     # case B(i)
-    Ui = CylinderList(CylinderGenerator.cylinders(S, S.E, 'lines2')).make_polar_on('B(1)')
+    Ui = CylinderList(CylinderGenerator.cylinders(S, S.E, 'lines2')).get_polar_on('B(1)')
     assert len(Ui)==3
     for i in range(1, 6):
         break

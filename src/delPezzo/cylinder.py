@@ -264,7 +264,7 @@ class Cylinder:
 
     def is_polar_on(self, cone:ConvexRationalPolyhedralCone|str):
         if isinstance(cone, str):
-            cone = NE_SubdivisionCone.representative(self.S, cone)
+            cone = NE_SubdivisionCone.representative(self.S, cone).cone
         return relint_contains_relint(self.Pol, cone)
     
     def is_complete_on(self, cone:ConvexRationalPolyhedralCone, exclude:ConvexRationalPolyhedralCone|None=None):
@@ -298,19 +298,19 @@ class Cylinder:
                     continue
                 yield t
 
-    def latex(self) -> str:
-        result = \
-            f'''
-            construction: {self.construction}
-            used contraction: {self.S._curves_name(self.contraction.contracted_curves)}
-            pencil generators: {self.S._curves_name(self.pencil_generators)}
-            generic fiber: {self.fiber}
-            polarity cone generators: {self.S._curves_name(self.support)}
-            forbidden cone generators: {self.S._curves_name(self.complement)}
-            is transversal: {self.transversal}
-            '''
+    # def latex(self) -> str:
+    #     result = \
+    #         f'''
+    #         construction: {self.construction}
+    #         used contraction: {self.S._curves_name(self.contraction.contracted_curves)}
+    #         pencil generators: {self.S._curves_name(self.pencil_generators)}
+    #         generic fiber: {self.fiber}
+    #         polarity cone generators: {self.S._curves_name(self.support)}
+    #         forbidden cone generators: {self.S._curves_name(self.complement)}
+    #         is transversal: {self.transversal}
+    #         '''
             
-        return result
+    #     return result
 
 
 class CylinderList(list):
@@ -403,20 +403,25 @@ class CylinderList(list):
             return Cone([],lattice=self.S.N.dual()).dual()
         return Cone(self.complement, lattice=self.S.N)
 
-    def is_polar_on(self, cone):
-        '''
-        cone is either a Cone or a type of cone, which would be converted to a representative
-        '''
-        if isinstance(cone, str):
-            cone = NE_SubdivisionCone.representative(self.S, cone)
-        return relint_contains_relint(self.Pol, cone)
-
-    def make_polar_on(self, cone) -> 'CylinderList':
+    def is_polar_on(self, cone:ConvexRationalPolyhedralCone|str) -> bool:
         '''
         cone is either a Cone or a type of cone, which would be converted to a representative
         '''
         if isinstance(cone, str):
             cone = NE_SubdivisionCone.representative(self.S, cone).cone
+        return relint_contains_relint(self.Pol, cone)
+
+    def get_polar_on(self, cone:ConvexRationalPolyhedralCone|str, restrict_to_ample:bool=True) -> 'CylinderList':
+        '''
+        return a  sublist of cylinders that are polar on the given cone 
+        
+        INPUT:
+        cone is either a Cone or a type of cone, which would be converted to a representative
+        '''
+        if isinstance(cone, str):
+            cone = NE_SubdivisionCone.representative(self.S, cone).cone
+        if restrict_to_ample:
+            cone = cone.intersection(self.S.Ample)
         cylinders = [c for c in self if c.is_polar_on(cone)]
         return CylinderList(cylinders, self.S)
 

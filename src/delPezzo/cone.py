@@ -65,8 +65,6 @@ class NE_SubdivisionCone:
             self._hash = hash(self._members())
         return self._hash
     
-    def __eq__(self, other):
-        return (self.cone, self.S, self.parent, self.parent_face, self.parent_ray) == (other.cone, other.S, other.parent, other.parent_face, other.parent_ray)
 
     def rays(self) -> Iterable[ToricLatticeElement]:        
         return self.cone.rays()
@@ -75,7 +73,7 @@ class NE_SubdivisionCone:
         '''
         returns faces of self that do not contain ray
         '''
-        for faces_of_dim in self.faces()[:-1]:
+        for faces_of_dim in self.cone.faces()[:-1]:
             for face in faces_of_dim:       # type: ignore
                 if not face.contains(ray):  # type: ignore
                     yield face              # type: ignore
@@ -101,7 +99,7 @@ class NE_SubdivisionCone:
             subdivision_ray = self._subdivision_ray()
         for f in self.subdivision_faces(subdivision_ray):
             cone = NE_SubdivisionCone.from_face_and_ray(self, f, subdivision_ray)
-            if not relint_contains_relint(self, cone):
+            if not relint_contains_relint(self.cone, cone.cone):
                 continue
             yield cone
 
@@ -136,8 +134,8 @@ class NE_SubdivisionCone:
         if not face.is_face_of(self.cone):
             raise ValueError(f'make_child: face (rays {list(face.rays())}) is not a face of this cone ({self} with rays {list(self.rays())}) of type {self.type()}')
         cone = NE_SubdivisionCone.from_face_and_ray(self, face, subdivision_ray)
-        if not relint_contains_relint(self.cone, cone):
-            raise ValueError(f'make_child: resulted cone (rays {list(cone.rays())}, type {cone.type()}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type()}')
+        if not relint_contains_relint(self.cone, cone.cone):
+            raise ValueError(f'make_child: resulted cone (rays {list(cone.cone.rays())}, type {cone.type()}) does not intersect the relative interior of this cone ({self} with rays {list(self.rays())}) of type {self.type()}')
         return cone
         # should we check for containing ample divisors? maybe not 
 
