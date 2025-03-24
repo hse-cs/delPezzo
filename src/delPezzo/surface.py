@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import itertools
 from functools import cached_property
 from collections.abc import Generator, Sequence
-from typing import Optional
+from typing import Optional, Union
 from types import MethodType
 
 
@@ -595,7 +595,7 @@ class Contraction():
 
 class Curve(ToricLatticeElement):
     #TODO should be a bubble class with a single curve in its linear system
-    def __init__(self, coordinates, name:str|None=None):
+    def __init__(self, coordinates: list[int], name:str|None=None):
         """
         Initialize a Curve object with given coordinates and an optional name.
 
@@ -612,8 +612,55 @@ class Curve(ToricLatticeElement):
         product = self.S._N_to_M(other) * self
         return product
 
-    
-
+    @classmethod
+    def name(cls, curve:Union['Curve',ToricLatticeElement])-> str:
+        '''
+        return the following name of a curve C
+            E_i for C=[0,0,..1,..0],
+            E_{ij} for C=E_i-E_j
+            L_{i_1 i_2 ...} for C=L-E_{i_1}-E_{i_2}...
+            Q_{i_1 i_2 ...} for C=2L- sum(E_j) + E_{i_1} + E_{i_2}...
+            coordinates of curve otherwise
+        '''
+        curve = list(curve)
+        if curve[0] == 0:
+            i,j = None, None
+            if 1 in curve:
+                i = curve.index(1)
+            if -1 in curve:
+                j = curve.index(-1)
+            if not all(k==i or k==j for k in range(len(curve)) if curve[k]!=0):
+                return str(curve)
+            if i and j:
+                return "E_{" + str(i) + str(j) + "}"
+            if i:
+                return f"E_{i}"
+        if curve[0] == 1:
+            minus_one_indices = [c for c in range(len(curve)) if curve[c]==-1]
+            if not all(f==0 or f==-1 for f in curve[1:]):
+                return str(curve)
+            if len(minus_one_indices) == 0:
+                return "L"
+            if len(minus_one_indices) == 1:
+                return "L_" + str(minus_one_indices[0])
+            return "L_{" + "".join(str(c) for c in minus_one_indices) + "}"
+        if curve[0] == 2:
+            if not all(f==0 or f==-1 for f in curve[1:]):
+                return str(curve)
+            zero_indices = [c for c in range(len(curve)) if curve[c]==0]
+            if len(zero_indices) == 0:
+                return "Q"
+            if len(zero_indices) == 1:
+                return "Q_" + str(zero_indices[0])
+            return "Q_{" + "".join(str(c) for c in zero_indices) + "}"
+        if curve[0] == 3:
+            if not all(f==0 or f==-1 for f in curve[1:]):
+                return str(curve)
+            zero_indices = [c for c in range(len(curve)) if curve[c]==0]
+            if len(zero_indices) == 0:
+                return "-K"
+            return "-K+" + "+".join(f"E_{c}" for c in zero_indices)
+        return str(curve)
 
 @dataclass(frozen=True)
 class Point:
