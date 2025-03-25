@@ -116,10 +116,6 @@ class WeakDependencies:
         return text
 
 
-# class BubbleCycle:
-#     '''
-#     This class represents a bubble cycle on P^2 (or any surface in its category of blowups), see [Pe23]_ for details. 
-#     '''
 
 class Surface: 
     r'''
@@ -157,7 +153,6 @@ class Surface:
         if degree<1  or degree>9 :
             raise ValueError("degree must be between 1 and 9")
         
-        self._curve_names = dict()
         self.extra = extra if extra != None else dict()
 
         if degree == 2 :
@@ -306,47 +301,26 @@ class Surface:
         return self.N([i/3  for i in triple_L])
         # we can divide by 3 if we provide all exceptional curves for contracting to P2
 
-    def _add_curve_name(self, curve:'Curve', name:str)->'Curve':
-        curve.set_immutable()
-        self._curve_names[curve] = name
-        return curve
-
-    #TODO move to class Curve?
-    # def _curve_name(self, curve:'Curve') -> str:
-    #     #print('naming curve ', curve)
-    #     if curve in self._curve_names.keys() and curve in self.minus_one_curves+self.minus_two_curves:
-    #         return self._curve_names[curve]
-    #     else:
-    #         return str(curve)
-
-    # def _curves_name(self, curves:Sequence['Curve']) -> str:
-    #     return ', '.join([self._curve_name(c) for c in curves])#print('naming curve ', curve)
 
     @cached_property
     def minus_two_curves(self) -> list['Curve']:
-        collinear = [self._add_curve_name(self.L - self.E[i] - self.E[j] - self.E[k], f'L_{i+1}{j+1}{k+1}') for i,j,k in self.dependencies.collinear_triples]
+        collinear = [self.L - self.E[i] - self.E[j] - self.E[k] for i,j,k in self.dependencies.collinear_triples]
         
-        infinitesimal = [self._add_curve_name(self.E[chain[i]]-self.E[chain[i+1]], f'E_{chain[i]}{chain[i+1]}') for chain in self.dependencies.infinitesimal_chains for i in range(len(chain)-1)]
+        infinitesimal = [self.E[chain[i]]-self.E[chain[i+1]] for chain in self.dependencies.infinitesimal_chains for i in range(len(chain)-1)]
         
-        conic = [self._add_curve_name(2*self.L - sum(self.E[i] for i in six), f'Q{"".join(i+1 for i in range(len(self.E)) if i not in six)}') for six in self.dependencies.sixs_on_conic]
+        conic = [2*self.L - sum(self.E[i] for i in six) for six in self.dependencies.sixs_on_conic]
         cubic = [3*self.L - sum(self.E) - self.E[i] for i in self.dependencies.cusp_cubics]
         curves = collinear + infinitesimal + conic + cubic
         curves = normalize_rays(curves, self.N)
         return curves
 
-    # def curve_name(self, c) -> str|None:
-    #     if c in self.minus_one_curves:
-    #         match self.dot(c, self.L):
-    #             case 0:
-    #                 pass
-
 
 
     @cached_property
     def minus_one_curves(self) -> list['Curve']:
-        exceptional_curves = [self._add_curve_name(e, f'E_{i+1}') for i,e in enumerate(self.E)]
-        lines = [self._add_curve_name(self.L-self.E[i]-self.E[j], f'L_{i+1}{j+1}') for i,j in itertools.combinations(range(len(self.E)), 2 )]
-        conics = [self._add_curve_name(2 *self.L-sum(self.E[i] for i in points), f'Q_{"".join(str(i+1) for i in range(len(self.E)) if i not in points)}') for points in itertools.combinations(range(len(self.E)), 5 )]
+        exceptional_curves = [e for i,e in enumerate(self.E)]
+        lines = [self.L-self.E[i]-self.E[j] for i,j in itertools.combinations(range(len(self.E)), 2 )]
+        conics = [2 *self.L-sum(self.E[i] for i in points) for points in itertools.combinations(range(len(self.E)), 5 )]
         cubics = [3 *self.L-sum(points)-double for points in itertools.combinations(self.E, 7 ) for double in points]
         curves = exceptional_curves + lines + conics + cubics
         if self.degree == 1 :
@@ -354,14 +328,18 @@ class Surface:
             quintics = [5 *self.L-sum(self.E) - sum(double_points) for double_points in itertools.combinations(self.E, 6 )]
             sextics = [6 *self.L-2 *sum(self.E) - triple_point for triple_point in self.E]
             curves += quartics + quintics + sextics
-        #for c in curves:
-         #   c.set_immutable()
         curves = normalize_rays(curves, self.N)
         if self.is_weak:
             curves = [c for c in curves if all(self.dot(c,f)>=0 for f in self.minus_two_curves)]
         return curves
-        
-    def curves_not_meeting(self, curves_to_filter, test_curves):
+
+    @cached_property
+    def negative_curves(self) -> list['Curve']:
+        return self.minus_one_curves + self.minus_two_curves
+
+    #TODO zero_curves (i.e., zero classes = fibrations, see conic bundles and [Lubbes-minimal]_)
+
+    def curves_not_meeting(self, curves_to_filter: Sequence['Curve'], test_curves: Sequence['Curve']) -> list['Curve']:
         return [c for c in curves_to_filter if all(self.dot(c,c2)==0  for c2 in test_curves)]
 
     @cached_property    
@@ -369,7 +347,7 @@ class Surface:
         '''
         Double intersections, which may coincide in triple ones (then 3 double intersections = 1 triple one)
         '''
-        return [Point(frozenset([a,b])) for a,b in itertools.combinations(self.minus_one_curves, 2) if self.dot(a,b)>0 ]
+        return [Point(frozenset([a,b])) for a,b in itertools.combinations(self.negative_curves, 2) if self.dot(a,b)>0 ]
 
     @cached_property    
     def triple_intersections(self): 
@@ -377,6 +355,10 @@ class Surface:
         Possible triple intersections
         '''
         return [Point(frozenset([a,b,c])) for a,b,c in itertools.combinations(self.minus_one_curves, 3 ) if self.dot(a,b)*self.dot(b,c)*self.dot(a,c)>0 ]
+
+    @cached_property
+    def points(self) -> list['Point']:
+        return self.double_intersections + [Point(frozenset([c])) for c in self.negative_curves] + [Point(frozenset())]
 
     #TODO refactor module to avoid usage of Ample in favor of NE through dualities. Reason is, NE has 240 rays in degree 1, and Ample has around 20k rays.
     @cached_property
@@ -594,17 +576,18 @@ class Contraction():
 
 
 class Curve(ToricLatticeElement):
+    '''
+    The Picard class of an irreducible curve on a surface
+    '''
     #TODO should be a bubble class with a single curve in its linear system
-    def __init__(self, coordinates: list[int], name:str|None=None):
+    def __init__(self, coordinates: list[int]):
         """
         Initialize a Curve object with given coordinates and an optional name.
 
         INPUT:
             coordinates: The coordinates representing the curve.
-            name (str, optional): The name of the curve. Defaults to None.
         """
         super().__init__(coordinates)
-        self.name = name
         self.set_immutable()
     #components = []
 
@@ -664,6 +647,29 @@ class Curve(ToricLatticeElement):
 
 @dataclass(frozen=True)
 class Point:
+    '''
+    a point on a weak surface S as an element of the bubble space of P^2
+
+    INPUT:
+        - ``curves`` -- list of curves meeting the point
+    '''
     curves : frozenset[Curve]
     # TODO define a proper equality
+
+
+@dataclass
+class BubbleClass:
+    '''
+    This class represents a bubble class (i.e., a pair of a bubble cycle and a divisor class) on a surface `S` in the category of blowups of P^2, see [Pe23]_ for details. 
+
+    INPUT:
+        - ``S`` -- a weak del Pezzo surface
+        - ``points`` -- points in the bubble cycle; each point has built-in dependencies with the blowup cycle of S
+        - ``inner_dependencies`` -- list of vectors representing the dependencies between points of the bubble cycle
+        - ``Picard_class`` -- ToricLatticeElement representing the element of Pic(S) of the bubble class
+    '''
+    S: 'Surface'
+    points: list['Point']
+    inner_dependencies: list[ToricLatticeElement] | None
+    Picard_class: ToricLatticeElement
 
