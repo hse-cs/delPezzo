@@ -20,7 +20,7 @@ class Finder:
     """
     def __init__(self, S:Surface, constructions: list[str]|None=None, recommended_coverings: list[CylinderList]|None=None) -> None:
         self.S = S
-        self.constructions = constructions or ['lines', 'lines2', 'tangent']
+        self.constructions = constructions or ['LL']
         self.recommended_coverings : list[CylinderList] = recommended_coverings or []
         self.all_cylinders = CylinderList(list(CylinderGenerator.all_cylinders(S, self.constructions)), S)
         self.coverings = [self.find_covering_on_cone(self.S.NE)]
