@@ -365,7 +365,7 @@ class Surface:
     def Ample(self):
         return self.dual_cone(self.NE.cone)
 
-    def disjoint_subsets(self, curves:list[Curve], maximal_only:bool=False) -> Generator[Curve]:
+    def disjoint_subsets(self, curves:list['Curve'], maximal_only:bool=False) -> Generator[list['Curve']]:
         '''
         return subsets of curves that are pairwise disjoint and disjoint with ones in independent_with
 
