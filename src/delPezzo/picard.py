@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from sage.all_cmdline import *   # import sage library, otherwise other imports break #type: ignore
+#from sage.all_cmdline import *   # import sage library, otherwise other imports break #type: ignore
 from sage.matrix.constructor import matrix, Matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
@@ -359,7 +359,7 @@ class PicMap:
                 [ 0 -1]),
                 map=
                 [1 0 0]
-                [0 1 0])            
+                [0 1 0])
         '''
         return "PicMap("+textwrap.indent(f"\nsrc={self.src},\ndest={self.dest},\nmap=\n{self.map})", "    ")
 
@@ -424,11 +424,14 @@ class PicMap:
         TESTS:
             >>> BlF1 = PicMarked(diagonal_matrix([1,-1,-1]))
             >>> Bl2F1 = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
-            >>> F1 = PicMarked(diagonal_matrix([1,-1]))
+            >>> F1 = PicardLattice(diagonal_matrix([1,-1]))
+            >>> F1_marked = PicMarked(diagonal_matrix([1,-1]))
             >>> PicMap(BlF1,F1,Matrix([[1,0,0],[0,1,0]])).is_isomorphism()
             False
-            >>> PicMap(F1,F1,Matrix([[1,0],[0,-1]])).is_isomorphism()
+            >>> PicMap(F1,F1_marked,Matrix([[1,0],[0,-1]])).is_isomorphism()
             True
+            >>> PicMap(F1_marked,F1_marked,Matrix([[1,0],[0,-1]])).is_isomorphism()
+            False
             >>> PicMap(F1,F1,Matrix([[0,1],[1,0]])).is_isomorphism()
             False
             >>> PicMap(Bl2F1, BlF1, diagonal_matrix([1,1,1])).is_isomorphism()
@@ -444,4 +447,3 @@ class PicMap:
         return True
     
 
-    
