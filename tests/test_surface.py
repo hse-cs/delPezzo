@@ -26,5 +26,5 @@ def test_disjoint_subsets():
     (ToricLattice(7), [2,-1,0,-1,-1,-1,-1], "Q_2"),
 ])
 def test_curve_name(N, coords, expected):
-    assert Curve.name(N(coords)) == expected
+    assert Curve.get_name(N(coords)) == expected
 
