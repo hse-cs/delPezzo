@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Self
 #from sage.all_cmdline import *   # import sage library, otherwise other imports break #type: ignore
 from sage.matrix.constructor import matrix, Matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
@@ -141,7 +142,7 @@ class Curve(ToricLatticeElement):
             if curve.name == name:
                 return curve
         else:
-            raise ValueError(f"Curve {name} not found")
+            raise ValueError(f"Curve {name} not found in negative curves")
 
     def dot(self, other:'Curve') -> int:
         '''
@@ -251,7 +252,7 @@ class PicMarked(PicardLattice):
         Q: A matrix for the dot product in the Picard lattice.
         neg_curves: the set of the classes of the negative curves
     '''
-    def __init__(self, Q:Matrix, neg_curves:Sequence[ToricLatticeElement|list[int]]|None=None, minus_one_curves_included=False) -> None:
+    def __init__(self, Q:Matrix, neg_curves:Sequence[ToricLatticeElement|list[int]]|None=None, minus_one_curves_included:bool=False) -> None:
         '''
             Initialize a PicMarked object with the intersection matrix and classes of negative curves.
 
@@ -289,13 +290,33 @@ class PicMarked(PicardLattice):
         '''
         return [c for c in self.neg_curves if c.dot(c)==-1]
 
+    def curve(self, input: str | ToricLatticeElement | list[int]) -> 'Curve':
+        '''
+        return the curve satisfying the input: either by name or by coordinates
+        
+        TESTS:
+            >>> P = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
+            >>> P.curve([0,0,1])
+            E_2
+            >>> P.curve("E_2")
+            E_2
+        '''
+        if isinstance(input, str):
+            return Curve.get_named(self, input)        
+        elif isinstance(input, ToricLatticeElement):
+            input = list(input)
+        candidates = [c for c in self.neg_curves if list(c)==list(input)]
+        if len(candidates) != 1:
+            raise ValueError(f"did not find a curve {input}")
+        return candidates[0]
+
     def curves_not_meeting(self, curves_to_filter: Sequence['Curve'], test_curves: Sequence['Curve']) -> list['Curve']:
         '''
         return the list of curves in ``curves_to_filter`` do not meet any of the curves ``test_curves``
 
         TESTS:
             >>> P = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
-            >>> P.curves_not_meeting(P.neg_curves, [Curve.get_named(P,"E_{12}")])
+            >>> P.curves_not_meeting(P.neg_curves, [P.curve("E_{12}")])
             [L_{12}]
         '''
         return [c for c in curves_to_filter if all(self.dot(c,c2)==0  for c2 in test_curves)]
@@ -325,18 +346,36 @@ class PicMarked(PicardLattice):
                 continue
             yield subset
             
-          
+    def disjoint_subsets_of_max_size(self, curves:list['Curve']) -> list[list[Curve]]:
+        '''
+        return subsets of maximal size
+        
+        TESTS:
+            >>> P = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
+            >>> P.disjoint_subsets_of_max_size(P.neg_curves)
+            [[E_{12}, L_{12}]]
+            >>> P = PicMarked(diagonal_matrix([1,-1,-1,-1,-1,-1,-1]))
+            >>> len(P.disjoint_subsets_of_max_size(P.neg_curves))
+            72
+        '''
+
+        maximal_subsets_by_inclusion = list(self.disjoint_subsets(curves, maximal_only=True))
+        max_size = max(len(subset) for subset in maximal_subsets_by_inclusion)
+        return [subset for subset in maximal_subsets_by_inclusion if len(subset)==max_size]
+
+
+
     def __repr__(self) -> str:
         return f"PicMarked(\n{self.Q},\nneg_curves: {self.neg_curves})"
 
 
 @dataclass
-class PicMap:
+class PicMap[T: PicardLattice]:
     '''
-    represents a map between (marked) Picard lattices
+    represents a map between Picard lattices, marked Picard lattices, or surfaces
     '''
-    src: PicardLattice
-    dest: PicardLattice
+    src: T
+    dest: T
     map: Matrix
 
 
@@ -365,7 +404,7 @@ class PicMap:
 
     def check(self) -> bool:
         '''
-        verify that the dimensions of the map are correct
+        verify that the map are correctly defined
 
         TESTS:
             >>> P1 = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
@@ -375,15 +414,21 @@ class PicMap:
             >>> PicMap(P1, P2, Matrix([[1,0],[0,0]])).check()
             False
         '''
-        return self.map.ncols() == self.src.rank and self.map.nrows() == self.dest.rank
+        dimensions_ok = self.map.ncols() == self.src.rank and self.map.nrows() == self.dest.rank
 
-    def adjoint(self) -> 'PicMap': #TODO do we need it?        
+        #TODO check that the product is preserved?
+
+        #if isinstance(self.src, PicMarked) and isinstance(self.dest, PicMarked): #TODO check that curves go to curves? no, the image may be reducible or non-negative
+        return dimensions_ok
+
+
+    def adjoint(self) -> Self: #TODO we need it for inverting contractions?
         '''
         return the map in the inverse direction with a transposed matrix. This is the pushforward of divisor classes
         '''
-        return PicMap(src=self.dest, dest=self.src, map=self.map.transpose())
+        return self.__class__(src=self.dest, dest=self.src, map=self.map.transpose())
 
-    def __mul__(self, other: 'PicMap') -> 'PicMap':
+    def __mul__(self, other: Self) -> Self:
         
         '''
         return the composition of two maps
@@ -400,9 +445,7 @@ class PicMap:
         '''
         if other.dest != self.src:
             raise ValueError("These maps are not composable")
-        if self is PicMarked and other is PicMarked:
-            pass #TODO check that curves go to curves? no, the image may be reducible or non-negative
-        return PicMap(src=other.src, dest=self.dest, map=self.map*other.map)
+        return self.__class__(src=other.src, dest=self.dest, map=self.map*other.map)
     
     def __call__(self, D: ToricLatticeElement) -> ToricLatticeElement:
         '''

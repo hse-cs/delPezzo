@@ -1,9 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 from typing import Generator
 from delPezzo import Surface
 from importlib import resources
-
+import itertools
 
 
 
@@ -88,8 +88,10 @@ class WeakDependencies:
         intersection = [i for i in chain if i in triple]
         return all(intersection[i] == chain[i] for i in range(len(intersection)))
 
-
+#TODO test that all blowups of P2 give exactly Lubbes' list except P1xP1
+    
     # def get_PicMarked(self):
+    #     assert self.dependencies.is_valid()
     # def minus_two_curves(self) -> list['Curve']:
     #     collinear = [self.L - self.E[i] - self.E[j] - self.E[k] for i,j,k in self.dependencies.collinear_triples]
         
