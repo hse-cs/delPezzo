@@ -1,16 +1,13 @@
-from ast import Not
-from delPezzo.picard import Curve, PicMap
-from sage.all import *    #type: ignore
+#from sage.all import *    #type: ignore
 # uncomment the above line for type checking in VSCode, or comment it for doctesting with `sage -python -m doctest surface.py`
-from delPezzo.picard import *
+#from delPezzo.picard import *
+from delPezzo.picard import Curve, PicMap, PicMarked
 
 from sage.matrix.constructor import matrix, Matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
 from sage.geometry.toric_lattice import ToricLatticeElement
 from sage.combinat.root_system.cartan_matrix import  CartanMatrix
-from sage.quadratic_forms.quadratic_form import QuadraticForm
-from sage.groups.perm_gps.permgroup_named import SymmetricGroup
 
 from dataclasses import dataclass, field
 import itertools
@@ -272,11 +269,32 @@ class Surface(PicMarked):
         print("Warning: void usage of Ample in favor of NE") # reason: NE has 240 rays in degree 1, and Ample has around 20k rays.
         return self.dual_cone(self.NE.cone)
 
-    def singularity_type(self):
+    def singularity_type(self) -> tuple[str]:
+        '''
+        return alphabetically ordered tuple of singularities as strings in the format `Rn`, where R is the type A,D, or E, and n is the rank.
+        
+        This is a coarse identifier of the combinatorial type of the surface.
+
+        TESTS:
+            >>> Surface(7).singularity_type()
+            ()
+            >>> Surface(6,[[1,-1,-1,-1]]).singularity_type()
+            ('A1',)
+            >>> Surface(5,[[0,1,-1,0,0], [0,0,0,1,-1]]).singularity_type()
+            ('A1', 'A1')
+            >>> Surface(4,[[0,1,-1,0,0,0],[0,0,1,-1,0,0],[0,0,0,0,1,-1]]).singularity_type()
+            ('A1', 'A2')
+        '''
+        def cartan_type_to_string(T):
+            return f"{T.type()}{T.rank()}"
+
         if len(self.minus_two_curves)==0:
-            return 'A0'
+            return tuple()
         T = CartanMatrix(-self.gram_matrix(self.minus_two_curves))
-        return T.cartan_type()
+        T = T.cartan_type()._type
+        if T.is_reducible():
+            return tuple(sorted([cartan_type_to_string(t) for t in T.component_types()]))
+        return (cartan_type_to_string(T),)
 
 
     def __str__(self) -> str:
@@ -311,8 +329,11 @@ class Surface(PicMarked):
             >>> g(S.curve("E_2"))
             E_1
         """
-        for g in SymmetricGroup(self.rank-1):
-            M = block_diagonal_matrix(Matrix([[1]]),g.matrix())
+        for permutation in itertools.permutations(range(self.rank-1)):
+            M = matrix.zero(self.rank)
+            M[0,0] = 1
+            for i, j in enumerate(permutation):
+                M[i+1,j+1] = 1
             try:
                 curve_images = [self.curve(M*c) for c in self.minus_two_curves]
                 if all(c in curve_images for c in self.minus_two_curves):
@@ -384,7 +405,7 @@ class Isomorphism(PicMap[Surface]):
             >>> phi(S.curve("E_1"))
             E_2
             >>> phi(S.point("E_1","L_{12}"))
-            E_2
+            Point(E_2, L_{12})
         '''
         if isinstance(elem, Point):
             return self.points_map[elem]
