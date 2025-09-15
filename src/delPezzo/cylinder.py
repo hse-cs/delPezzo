@@ -7,15 +7,26 @@ from collections import Counter
 from sage.geometry.cone import ConvexRationalPolyhedralCone, Cone
 from sage.geometry.toric_lattice import ToricLatticeElement
 
-from .surface import Surface, Contraction, Curve, Point
+from .surface import Surface, Curve, Point
 from .cone import NE_SubdivisionCone, relint_contains_relint
+
+Stratum = None | Curve | Point
+
+@dataclass
+class Pencil:
+    basepoints: tuple[Stratum]
+    reducible_fibers: tuple[tuple[Curve,...],...]
+
+
 
 @dataclass(frozen=True)
 class Cylinder:
     '''
-    fiber is the generic fiber class of the cylinder (or cylinders if several). If the collection is transversal, then the fiber is empty.
-    complement is the list of (-1)-curves lying in the complement of the cylinders' union
-    support is the list of (-1)-curves lying in the support of divisors, where the cylinders' union is polar
+
+    Attributes:
+      - `fiber` is the generic fiber class of the cylinder (or cylinders if several). If the collection is transversal, then the fiber is empty.
+      - `complement` is the list of (-1)-curves lying in the complement of the cylinders' union
+      - `support` is the list of (-1)-curves lying in the support of divisors, where the cylinders' union is polar
     '''
     S : Surface
     construction: str|None

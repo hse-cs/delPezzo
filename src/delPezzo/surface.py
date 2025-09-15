@@ -85,8 +85,10 @@ class Point:
         return self.curves == other.curves or self.curves[::-1] == other.curves
 
 
-T=TypeVar('T')
 
+
+
+T=TypeVar('T')
 def eq_class_representatives(permutations:list[Callable[[T],T]], objects:list[T]) -> Generator[T, None, None]:
     '''
     return representatives of equivalence classes of objects under given permutations of those objects
