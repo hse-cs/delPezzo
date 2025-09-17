@@ -130,17 +130,20 @@ class Surface(PicMarked):
         - L -- A Curve object representing the line class from P^2.
         - NE -- A NE_SubdivisionCone object representing the NE cone.
         - minus_two_curves -- a list of all (-2)-curves on the surface
+        - res_curves -- a list of all negative curves on the surface with self-intersection at most -2
         - points -- a list of intersection points of negative curves under assumption that no triple intersections occur
-        - is_weak -- a boolean indicating whether the surface is weak
+        - is_delPezzo -- a boolean indicating whether the surface is del Pezzo
+        - is_weak_delPezzo -- a boolean indicating whether the surface is a (possibly weak) del Pezzo
 
     '''
-    def __init__(self, degree:int, minus_two_curves:Sequence[ToricLatticeElement|list[int]]|None=None, extra:dict[str,str]|None=None) -> None:
+    def __init__(self, degree:int, neg_curves:Sequence[ToricLatticeElement|list[int]]|None=None, extra:dict[str,str]|None=None) -> None:
         '''
-            Initialize a (weak) del Pezzo surface that is a blowup of P2.
+            Initialize a projective surface that is a blowup of P2. 
 
+            Usually a (weak) del Pezzo surface.
         INPUT:
             - ``degree`` -- An integer between 1 and 9, inclusive, representing the degree of the del Pezzo surface.
-            - ``minus_two_curves`` -- a list of (-2)-curves in the coordinates corresponding to a blowup of P2.
+            - ``neg_curves`` -- a list of negative curves (except (-1)-curves) in the coordinates corresponding to a blowup of P2.
             - ``extra`` -- Optional additional data. 
 
         TESTS:
@@ -151,12 +154,14 @@ class Surface(PicMarked):
         if self.degree<1  or self.degree>9 :
             raise ValueError("degree must be between 1 and 9")
         blowups = 9 - degree
-        if minus_two_curves is None:
-            minus_two_curves = []
-        super().__init__(diagonal_matrix([1]+[-1]*blowups), minus_two_curves)
+        if neg_curves is None:
+            neg_curves = []
+        super().__init__(diagonal_matrix([1]+[-1]*blowups), neg_curves)
         
         self.extra = extra if extra != None else dict()        
-        self.is_weak = len(minus_two_curves)>0
+
+        self.is_delPezzo = all(c.dot(c)==-1 for c in self.neg_curves)
+        self.is_weak_delPezzo = all(c.dot(c)>=-2 for c in self.neg_curves)
 
         E = identity_matrix(QQ, blowups+1)[:,1:].columns() 
         self.L = self.N([1] + [0]*blowups)
@@ -182,6 +187,21 @@ class Surface(PicMarked):
             1
         """
         return [c for c in self.neg_curves if c.dot(c) == -2]
+
+    @cached_property
+    def res_curves(self) -> list[Curve]: 
+        """
+        return a list of all negative curves on the surface with self-intersection at most -2.
+
+        They correspond to the resolution of singularities of the anticanonical model.
+
+        TESTS:
+            >>> Surface(6).res_curves
+            []
+            >>> len(Surface(6,[[1,-1,-1,-1]]).res_curves)
+            1
+        """
+        return [c for c in self.neg_curves if c.dot(c) <= -2]
 
 
     @cached_property    
@@ -213,7 +233,10 @@ class Surface(PicMarked):
 
     def blowup(self, curves: Sequence[Curve|ToricLatticeElement|list[int]]) -> PicMap['Surface']:
         '''
-        return the blowup of this surface at a point lying on provided (-1)-curves (in the quantity of 0, 1 or 2) as a map to a weak del Pezzo surface
+        return the blowup of this surface at a point lying on provided negative curves (in the quantity of 0, 1 or 2) as a map from self to the new surface
+
+        ARGUMENTS:
+            - ``curves`` -- a list of negative curves that contain the blown up point
         
         TESTS:
             >>> S = Surface(6,[[1,-1,-1,-1]])
@@ -224,20 +247,23 @@ class Surface(PicMarked):
             >>> S.blowup([[0,1,0,0]]).dest.minus_two_curves
             [L_{123}, E_{14}]
         '''
-        resulting_minus_two_curves = [
-            list(c) + [0] for c in self.minus_two_curves
+        resulting_neg_curves = [
+            list(c) + [0] for c in self.neg_curves if c not in curves and c.dot(c)<=-2
             ] + [
             list(c) + [-1] for c in curves
         ]
-        new_surface = Surface(self.degree-1, resulting_minus_two_curves)
+        new_surface = Surface(self.degree-1, resulting_neg_curves)
         map_matrix = identity_matrix(QQ, self.rank+1)[:,:-1]
         return PicMap[Surface](self, new_surface, map_matrix)
 
 
-    def blowups(self) -> Generator['PicMap[Surface]', None, None]:
+    def blowups(self, minus_one_only:bool=True) -> Generator['PicMap[Surface]', None, None]:
         '''
-        return all blowups of this surface as maps to weak del Pezzo surfaces
+        return all blowups of this surface as maps to generated surfaces
         
+        ARGUMENTS:
+            - ``minus_one_only`` -- if True, only return blowups at points outside of curves of self-intersection <=-2
+
         TESTS:
             >>> len(list(Surface(6,[[1,-1,-1,-1]]).blowups()))
             4
@@ -251,8 +277,12 @@ class Surface(PicMarked):
         '''
         if self.degree<=3:
             raise NotImplementedError
-        for additional_minus_two_curves in [[]] + [[c] for c in self.minus_one_curves]  + [pt.curves for pt in self.points if pt.is_minus_one()]:
-            yield self.blowup(additional_minus_two_curves)
+        if minus_one_only:
+            sets_of_curves_to_transform = [[]] + [[c] for c in self.minus_one_curves]  + [pt.curves for pt in self.points if pt.is_minus_one()]
+        else:
+            sets_of_curves_to_transform = [[]] + [[c] for c in self.neg_curves] + [pt.curves for pt in self.points]
+        for transformed_curves in sets_of_curves_to_transform:
+            yield self.blowup(transformed_curves)
 
 
 
@@ -271,11 +301,11 @@ class Surface(PicMarked):
         print("Warning: void usage of Ample in favor of NE") # reason: NE has 240 rays in degree 1, and Ample has around 20k rays.
         return self.dual_cone(self.NE.cone)
 
-    def singularity_type(self) -> tuple[str]:
+    def singularity_type(self) -> tuple[str,...]:
         '''
         return alphabetically ordered tuple of singularities as strings in the format `Rn`, where R is the type A,D, or E, and n is the rank.
         
-        This is a coarse identifier of the combinatorial type of the surface.
+        This is a coarse identifier of the combinatorial type of a weak del Pezzo surface. Not applicable to other surfaces.
 
         TESTS:
             >>> Surface(7).singularity_type()
@@ -290,6 +320,9 @@ class Surface(PicMarked):
         def cartan_type_to_string(T):
             return f"{T.type()}{T.rank()}"
 
+        if not self.is_weak_delPezzo:
+            raise ValueError("this function is only applicable to (weak) del Pezzo surfaces")
+
         if len(self.minus_two_curves)==0:
             return tuple()
         T = CartanMatrix(-self.gram_matrix(self.minus_two_curves))
@@ -300,15 +333,24 @@ class Surface(PicMarked):
 
 
     def __str__(self) -> str:
-        return f"{'weak ' if self.is_weak else ''}del Pezzo surface of degree {self.degree}{f' with singularities {self.singularity_type()}' if self.is_weak else ''}"
+        if self.is_delPezzo:
+            name = "del Pezzo surface"
+            detail = ""
+        elif self.is_weak_delPezzo:
+            name = "weak del Pezzo surface"
+            detail = f" with singularities {self.singularity_type()}"
+        else:
+            name = "projective surface"
+            detail = f" with {len(self.res_curves)} curves of self-intersection <= -2"
+        return f"{name} of degree {self.degree}{detail}"
 
 
     def __repr__(self) -> str:
         text = str(self)
         if self.extra:
             text += f",\n extra: {self.extra}"
-        if self.is_weak:
-            text += "\n (-2)-curves: " + str(self.minus_two_curves)
+        if not self.is_delPezzo:
+            text += "\n (-2)-curves: " + str(self.res_curves)
         return text
 
     def isomorphisms(self, other: 'Surface') -> Generator['Isomorphism', None, None]:
@@ -337,17 +379,20 @@ class Surface(PicMarked):
             for i, j in enumerate(permutation):
                 M[i+1,j+1] = 1
             try:
-                curve_images = [self.curve(M*c) for c in self.minus_two_curves]
-                if all(c in curve_images for c in self.minus_two_curves):
+                curve_images = [self.curve(M*c) for c in self.res_curves]
+                if all(c in curve_images for c in self.res_curves):
                     yield Isomorphism(self, self, M)
             except ValueError:
                 continue
 
 
-    def blowups_nonequivalent_over_P2(self) -> Generator[PicMap['Surface'], Any, None]:
+    def blowups_nonequivalent_over_P2(self, minus_one_only:bool=True) -> Generator[PicMap['Surface'], Any, None]:
         '''
         return representatives of equivalence classes of blowups of self under automorphisms over P2
         
+        ARGUMENTS:
+            - ``minus_one_only`` -- if True, only return blowups at points outside of curves of self-intersection <=-2
+
         TESTS:
             >>> [blowup.dest.minus_two_curves for blowup in Surface(7).blowups_nonequivalent_over_P2()]
             [[], [E_{13}], [L_{123}], [E_{13}, L_{123}]]
@@ -357,10 +402,14 @@ class Surface(PicMarked):
             raise NotImplementedError
         yield self.blowup([])
         automorphisms = list(self.automorphisms_over_P2())
-        curve_representatives = eq_class_representatives(automorphisms, self.minus_one_curves)
+        if minus_one_only:
+            curve_representatives = eq_class_representatives(automorphisms, self.minus_one_curves)
+            point_representatives = eq_class_representatives(automorphisms, [pt for pt in self.points if pt.is_minus_one()])
+        else:
+            curve_representatives = eq_class_representatives(automorphisms, self.neg_curves)
+            point_representatives = eq_class_representatives(automorphisms, self.points)
         for c in curve_representatives:
             yield self.blowup([c])
-        point_representatives = eq_class_representatives(automorphisms, [pt for pt in self.points if pt.is_minus_one()])
         for pt in point_representatives:
             yield self.blowup(pt.curves)
 
