@@ -91,7 +91,7 @@ class Contraction(PicMap[Surface]):
             print(e, M)
         Q = A.T*S.Q*A
         neg_curve_images = [M*c for c in S.neg_curves]
-        dest = Surface(S.degree - len(curves_to_contract), neg_curve_images, Q=Q, K=list(M*S.K), minus_one_curves_included=True)
+        dest = Surface(S.degree + len(curves_to_contract), neg_curve_images, Q=Q, K=list(M*S.K), minus_one_curves_included=True)
         pullback_map = PicMap[Surface](src=dest, dest=S, map=A)
         contraction = cls(src=S, dest=dest, map=M, E=E, C=C, pullback_map=pullback_map)
         return contraction

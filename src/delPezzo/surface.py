@@ -163,7 +163,8 @@ class Surface(PicMarked):
         if Q == None or K == None:
             Q = diagonal_matrix([1]+[-1]*blowups)
             K = [-3] + [1]*blowups
-
+        else:
+            assert Q.rank()==blowups+1, "wrong degree"
         super().__init__(Q, NE_gens, minus_one_curves_included   )
         self.K = self.N(K) # canonical divisor
         self.K.set_immutable()
