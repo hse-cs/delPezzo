@@ -1,4 +1,5 @@
-from sage.all_cmdline import *   # import sage library, otherwise other imports break #type: ignore
+from sage.all import *   # import sage library, otherwise other imports break #type: ignore
+
 from sage.geometry.toric_lattice import ToricLatticeElement
 from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_rays
 from functools import cached_property, cache
@@ -7,7 +8,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Union
 
-from .surface import Surface
+from delPezzo.surface import Surface
+
 #TODO make relint a class (dumb class over cone with set operators)
 
 

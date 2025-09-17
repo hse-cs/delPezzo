@@ -4,17 +4,17 @@ from typing import Self
 from sage.matrix.constructor import matrix, Matrix
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
-from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice
+from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice, ToricLattice_ambient
 from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_rays
 import itertools
 from functools import cached_property, cache
 from collections.abc import Generator, Sequence
 import textwrap
-
+from sage.rings.integer_ring import ZZ
 
 class PicardLattice:
     r'''
-    This class represents a Picard lattice of a weak del Pezzo surface.
+    This class represents a Picard lattice of a smooth rational projective surface.
     
     Attributes:
         N: An ToricLattice object used to represent the Picard lattice of the variety.
@@ -33,9 +33,9 @@ class PicardLattice:
             [ 1  0]
             [ 0 -1])
         '''
-        self.rank = Q.rank()
-        self.N = ToricLattice(self.rank)
-        self.Q = Q
+        self.rank : int = Q.rank()
+        self.N : ToricLattice_ambient = ToricLattice(self.rank)
+        self.Q : Matrix = Q
 
     def dot(self, a:ToricLatticeElement, b:ToricLatticeElement) -> int:
         '''
@@ -102,30 +102,38 @@ class PicardLattice:
     def __repr__(self) -> str:
         return f"PicardLattice(\n{self.Q})"
 
+#TODO arithmetic operations on curves should return ToricLatticeElement
 class Curve(ToricLatticeElement):
     '''
     The Picard class of an irreducible curve on a surface
     '''
 
     @classmethod
-    def make(cls, P: PicardLattice, vector: list[int]|ToricLatticeElement):
+    def make(cls, P: PicardLattice, vector: list[int]|ToricLatticeElement, standard_basis: bool = True):
         """
         Create a Curve object with given coordinates and an optional name.
 
         INPUT:
             P: the Picard lattice
             coordinates: The coordinates representing the curve.
+            standard_basis: If True, the coordinates are assumed to be in the standard basis of the Picard lattice of the blowup of P2, namely L, E_1,..,E_k.
 
         TESTS:
             >>> Curve.make(PicardLattice(diagonal_matrix([1,-1])), [1,-1])
             L_1
+            >>> Curve.make(PicardLattice(Matrix([[0,1],[1,0]])), [1,0], standard_basis=False)
+            N(1, 0)
         """
         if isinstance(vector, ToricLatticeElement):
             vector = list(vector)
-        curve = cls(P.N, vector)
+        try:
+            curve = cls(P.N, vector)
+        except:
+            raise ValueError(f"invalid coordinates {vector} in {P.N}")
         curve.set_immutable()
         curve.Pic = P
-        curve.name = Curve.get_name(curve)
+        
+        curve.name = Curve.get_name(curve) if standard_basis else str(P.N(vector))
         return curve
 
     @classmethod
@@ -159,9 +167,11 @@ class Curve(ToricLatticeElement):
         return product
 
     def __repr__(self) -> str:
+        if not hasattr(self, 'name'):
+            raise AttributeError(f"Curve {super().__repr__()} not initialized")
         return self.name
 
-    #TODO names for P1 x P1 ?
+    #TODO names for P1 x P1 ? forget for now
     @classmethod
     def get_name(cls, curve:ToricLatticeElement)-> str:
         '''
@@ -216,7 +226,7 @@ class Curve(ToricLatticeElement):
 @cache
 def candidate_minus_one_curves(degree) -> list['Curve']:
     '''
-    return list of possible (-1)-curve classes in standard coordinates for a del Pezzo surface of degree ``degree``
+    return list of possible (-1)-curve classes in standard coordinates for a smooth rational projective surface of anticanonical degree ``degree``
 
     TESTS:
         >>> candidate_minus_one_curves(8)
@@ -245,21 +255,24 @@ def candidate_minus_one_curves(degree) -> list['Curve']:
 
 class PicMarked(PicardLattice):
     r'''
-    This class represents a Picard lattice marked with classes of negative curves.
+    This class represents a Picard lattice marked with a cone of curves (i.e., the Mori cone).
+    
+    In most cases rays of the cone are exactly classes of negative irreducible curves.
     
     Attributes:
         N: An ToricLattice object used to represent the Picard lattice of the variety.
         Q: A matrix for the dot product in the Picard lattice.
+        NE_gens: list classes of classes generating the Mori cone.
         neg_curves: the set of the classes of the negative curves
     '''
-    def __init__(self, Q:Matrix, neg_curves:Sequence[ToricLatticeElement|list[int]]|None=None, minus_one_curves_included:bool=False) -> None:
+    def __init__(self, Q:Matrix, NE_gens:Sequence[ToricLatticeElement|list[int]]|None=None, minus_one_curves_included:bool=False) -> None:
         '''
             Initialize a PicMarked object with the intersection matrix and classes of negative curves.
 
         INPUT:
             - ``Q`` -- The intersection matrix of the lattice.
-            - ``neg_curves`` -- a list of negative curves in the coordinates corresponding to a blowup of P2.
-            - ``minus_one_curves_included`` -- indicates whether the (-1)-curves are provided or should be computed
+            - ``NE_gens`` -- a list of generators of the Mori cone. Usually they are negative curves in the coordinates corresponding to a blowup of P2.
+            - ``minus_one_curves_included`` -- indicates whether the (-1)-curves are provided or should be computed. 
 
         TESTS:
             >>> PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
@@ -268,16 +281,51 @@ class PicMarked(PicardLattice):
             [ 0 -1  0]
             [ 0  0 -1],
             neg_curves: [E_{12}, E_2, L_{12}])
+            >>> P=PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]]); P.NE.rays()
+            N(0,  1, -1),
+            N(0,  0,  1),
+            N(1, -1, -1)
+            in 3-d lattice N
+            >>> P1xP1 = PicMarked(Matrix([[0,1],[1,0]]),[[1,0],[0,1]], minus_one_curves_included=True)
+            2-d cone in 2-d lattice N
         '''
         super().__init__(Q)
-        if neg_curves is None:
-            neg_curves = []
-        neg_curves = [self.N(c) for c in neg_curves]
+        if NE_gens is None:
+            NE_gens = []
+        NE_gens = [self.N(c) for c in NE_gens]
         if not minus_one_curves_included:
+            if not all(self.dot(c,c)<0 for c in NE_gens):
+                raise ValueError("You must provide (-1)-curves if there is a non-negative NE generator")
+            neg_curves = NE_gens
             minus_one_curves = candidate_minus_one_curves(10-self.rank)
             minus_one_curves =  [c for c in minus_one_curves if all(self.dot(c,f)>=0 for f in neg_curves)]
-            neg_curves = list(neg_curves) + minus_one_curves
-        self.neg_curves = [Curve.make(self,neg_curve) for neg_curve in neg_curves]
+            NE_gens = list(neg_curves) + minus_one_curves
+        standard_basis = Q.is_diagonal() and Q[0,0] == 1 and all(Q[i,i]==-1 for i in range(1,Q.rank()))
+        self.NE = Cone(NE_gens, self.N)
+        self.NE_gens : list['Curve'] = [Curve.make(self,curve, standard_basis) for curve in self.NE.rays()]
+        self.check()
+
+    def check(self) -> bool:
+        '''
+        check that all provided generators are rays of the Mori cone
+
+        TESTS:
+            >>> PicMarked(Matrix([[0,1],[1,0]]),[[1,0],[0,1]], minus_one_curves_included=True).check()
+            True
+        '''
+        return all(c in self.NE.rays() for c in self.NE_gens)
+
+
+    @cached_property
+    def neg_curves(self):
+        '''
+        return negative curves among generators of the Mori cone
+
+        TESTS:
+            >>> P1xP1=PicMarked(Matrix([[0,1],[1,0]]),[[1,0],[0,1]], minus_one_curves_included=True); P.neg_curves
+            []
+        '''
+        return [c for c in self.NE_gens if c.dot(c)<0]
 
     @cached_property
     def minus_one_curves(self) -> list['Curve']:
@@ -307,7 +355,8 @@ class PicMarked(PicardLattice):
             input = list(input)
         candidates = [c for c in self.neg_curves if list(c)==list(input)]
         if len(candidates) != 1:
-            raise ValueError(f"did not find a curve {input}")
+            #raise ValueError(f"did not find a curve {input}")
+            return Curve.make(self, input)
         return candidates[0]
 
     def curves_not_meeting(self, curves_to_filter: Sequence['Curve'], test_curves: Sequence['Curve']) -> list['Curve']:
@@ -366,8 +415,26 @@ class PicMarked(PicardLattice):
 
 
     def __repr__(self) -> str:
-        return f"PicMarked(\n{self.Q},\nneg_curves: {self.neg_curves})"
+        '''
+        represent the marked lattice
 
+        TESTS:
+            >>> PicMarked(Matrix([[0,1],[1,0]]),[[1,0],[0,1]], minus_one_curves_included=True)
+            PicMarked(
+            [0 1]
+            [1 0],
+            neg_curves: []
+            other_NE_gens=[N(1, 0), N(0, 1)])
+            >>> PicMarked(Matrix([[1]]),[[1]], minus_one_curves_included=True)
+            PicMarked(
+            [1],
+            neg_curves: []
+            other_NE_gens=[L])
+        '''
+        non_neg_gens = [c for c in self.NE_gens if c not in self.neg_curves]
+        non_neg_gens_string = "" if len(non_neg_gens)==0 else f"\nother_NE_gens={non_neg_gens}"
+        return f"PicMarked(\n{self.Q},\nneg_curves: {self.neg_curves}{non_neg_gens_string})"
+            
 
 @dataclass
 class PicMap[T: PicardLattice]:
@@ -422,12 +489,6 @@ class PicMap[T: PicardLattice]:
         return dimensions_ok
 
 
-    def adjoint(self) -> Self: #TODO we need it for inverting contractions?
-        '''
-        return the map in the inverse direction with a transposed matrix. This is the pushforward of divisor classes
-        '''
-        return self.__class__(src=self.dest, dest=self.src, map=self.map.transpose())
-
     def __mul__(self, other: Self) -> Self:
         
         '''
@@ -481,11 +542,14 @@ class PicMap[T: PicardLattice]:
             False
         '''
         if isinstance(self.src, PicMarked) and isinstance(self.dest, PicMarked):
-            if {tuple(c) for c in self.dest.neg_curves} != {tuple(self(c)) for c in self.src.neg_curves}:
+            if {tuple(c) for c in self.dest.NE_gens} != {tuple(self(c)) for c in self.src.NE_gens}:
                 return False
         if not (self.map.is_square() and (abs(self.map.det()) == 1)):
             return False
-        if not self.dest.gram_matrix([self(b) for b in self.src.N.basis()]) == self.src.Q:
+        src_basis = self.src.N.basis()
+        if src_basis == None:
+            raise ValueError("The toric lattice must have a basis")
+        if not self.dest.gram_matrix([self(b) for b in src_basis]) == self.src.Q: 
             return False
         return True
     

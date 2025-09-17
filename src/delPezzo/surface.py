@@ -1,19 +1,20 @@
-#from sage.all import *    #type: ignore
+from sage.all import *    #type: ignore
 # uncomment the above line for type checking in VSCode, or comment it for doctesting with `sage -python -m doctest surface.py`
 #from delPezzo.picard import *
 from delPezzo.picard import Curve, PicMap, PicMarked
 
 from sage.matrix.constructor import matrix, Matrix
+from sage.matrix.matrix_integer_dense import Matrix_integer_dense
 from sage.matrix.special import diagonal_matrix, identity_matrix
 from sage.rings.rational_field import QQ
 from sage.geometry.toric_lattice import ToricLatticeElement
 from sage.combinat.root_system.cartan_matrix import  CartanMatrix
-
+from sage.rings.integer_ring import ZZ
 from dataclasses import dataclass, field
 import itertools
 from functools import cached_property, cache
 from collections.abc import Generator, Sequence
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar, Self
 
 
 
@@ -27,6 +28,7 @@ class Point:
 
     INPUT:
         - ``curves`` -- list of curves meeting the point
+        - ``validate`` -- whether to check that the point is valid
     '''
     curves : tuple[Curve, Curve]
     validate: bool = True
@@ -136,15 +138,17 @@ class Surface(PicMarked):
         - is_weak_delPezzo -- a boolean indicating whether the surface is a (possibly weak) del Pezzo
 
     '''
-    def __init__(self, degree:int, neg_curves:Sequence[ToricLatticeElement|list[int]]|None=None, extra:dict[str,str]|None=None) -> None:
+    def __init__(self, degree:int, NE_gens:Sequence[ToricLatticeElement|list[int]]|None=None, extra:dict[str,str]|None=None, Q:Matrix_integer_dense|None=None, K:list[int]|None=None, minus_one_curves_included:bool=False) -> None:
         '''
             Initialize a projective surface that is a blowup of P2. 
 
             Usually a (weak) del Pezzo surface.
         INPUT:
             - ``degree`` -- An integer between 1 and 9, inclusive, representing the degree of the del Pezzo surface.
-            - ``neg_curves`` -- a list of negative curves (except (-1)-curves) in the coordinates corresponding to a blowup of P2.
+            - ``NE_gens`` -- a list of generators of the Mori cone. Usually negative curves, possibly except (-1)-curves.
             - ``extra`` -- Optional additional data. 
+            - ``Q`` -- The intersection matrix of the lattice. By default we use the coordinates corresponding to a blowup of P2.
+            - ``K`` -- The canonical divisor of the surface. - ``minus_one_curves_included`` -- indicates whether the (-1)-curves are provided or should be computed.
 
         TESTS:
             >>> Surface(6)
@@ -154,26 +158,32 @@ class Surface(PicMarked):
         if self.degree<1  or self.degree>9 :
             raise ValueError("degree must be between 1 and 9")
         blowups = 9 - degree
-        if neg_curves is None:
-            neg_curves = []
-        super().__init__(diagonal_matrix([1]+[-1]*blowups), neg_curves)
+        if NE_gens is None:
+            NE_gens = []
+        if Q == None or K == None:
+            Q = diagonal_matrix([1]+[-1]*blowups)
+            K = [-3] + [1]*blowups
+
+        super().__init__(Q, NE_gens, minus_one_curves_included   )
+        self.K = self.N(K) # canonical divisor
+        self.K.set_immutable()
         
         self.extra = extra if extra != None else dict()        
 
         self.is_delPezzo = all(c.dot(c)==-1 for c in self.neg_curves)
         self.is_weak_delPezzo = all(c.dot(c)>=-2 for c in self.neg_curves)
 
-        E = identity_matrix(QQ, blowups+1)[:,1:].columns() 
-        self.L = self.N([1] + [0]*blowups)
+        #E = identity_matrix(QQ, blowups+1)[:,1:].columns() 
+        #self.L = self.N([1] + [0]*blowups) #TODO this is attribute of PicMap, not of Surface
         # E is the list of exceptional configurations, so the basis is L, E[0], .. , E[n_blowups-1]
-        self.E = [self.N(e) for e in E]
-        self.K = self.N([-3] + [1]*blowups) # canonical divisor
-        for e in self.E:
-            e.set_immutable()
+        #self.E = [self.N(e) for e in E] #TODO ditto
+        #for e in self.E:
+        #    e.set_immutable()
 
+        #TODO rework delPezzo.cone
+        #from delPezzo.cone import NE_SubdivisionCone
+        #self.NE = NE_SubdivisionCone.NE(self)
 
-        from delPezzo.cone import NE_SubdivisionCone
-        self.NE = NE_SubdivisionCone.NE(self)
 
     @cached_property
     def minus_two_curves(self) -> list[Curve]: 
@@ -353,14 +363,82 @@ class Surface(PicMarked):
             text += "\n (-2)-curves: " + str(self.res_curves)
         return text
 
+    def _complete_partial_isomorphism_with(self, other: 'Surface', partial: list[tuple[Curve,Curve]], source_candidates: list[Curve], destination_candidates: list[Curve]) -> Generator['Isomorphism', None, None]:
+        '''
+        return all isomorphisms satisfying the partial data
+
+        INPUT:
+            - other -- other surface
+            - partial -- list of (source, destination) pairs
+            - source_candidates -- list of curves in self to send
+            - destination_candidates -- list of curves in other that we can send to
+
+        TESTS:
+            >>> S = Surface(6)
+            >>> isoms = list(S._complete_partial_isomorphism_with(S, [],S.neg_curves, S.neg_curves)); len(isoms)
+            12
+            >>> all(phi.check() for phi in isoms)
+            True
+        '''
+        if Matrix([p[0] for p in partial]).rank() == self.rank:
+            new_candidate = Isomorphism.from_curve_images(self, other, partial)
+            if new_candidate != None:
+                yield new_candidate
+            return
+    
+        if len(source_candidates) == 0:
+            return
+        
+        candidate = source_candidates[0]
+        def image_is_correct(c):
+            return all(self.dot(candidate, pair[0]) == other.dot(c, pair[1]) for pair in partial)
+        images = [c for c in destination_candidates if image_is_correct(c)]
+        
+        for i in images:
+            new_partial = partial + [(candidate, i)]
+            new_src_candidates = [c for c in source_candidates if c != candidate]
+            new_dest_candidates = [c for c in destination_candidates if c != i]
+            yield from self._complete_partial_isomorphism_with(other, new_partial, new_src_candidates, new_dest_candidates)
+
     def isomorphisms(self, other: 'Surface') -> Generator['Isomorphism', None, None]:
         """
         return all isomorphisms from self to other
 
-
+        TESTS:
+            >>> S = Surface(6); len(list(S.isomorphisms(S)))
+            12
         """
-        raise NotImplementedError
-    
+        # we assume that negative curves span the lattice
+        if self.rank <= 2:
+            raise NotImplementedError
+        
+        max_subset = self.disjoint_subsets_of_max_size(self.minus_one_curves)[0]
+        for other_max_subset in other.disjoint_subsets_of_max_size(other.minus_one_curves):
+            for permuted_other_max_subset in itertools.permutations(other_max_subset):
+                partial = list(zip(max_subset, permuted_other_max_subset)) + [(self.K, other.K)]
+                yield from self._complete_partial_isomorphism_with(other, partial, self.res_curves, other.res_curves)
+
+
+    def isomorphism(self, other: 'Surface') ->'Isomorphism|None':
+        """
+        return an isomorphism from self to other if exists
+
+        TESTS:
+            >>> S = Surface(6); S.isomorphism(S)
+            Isomorphism(
+            src=del Pezzo surface of degree 6,
+            dest=del Pezzo surface of degree 6,
+            map=
+            [1 0 0 0]
+            [0 1 0 0]
+            [0 0 1 0]
+            [0 0 0 1])
+            >>> Surface(6).isomorphism(Surface(6,[[1,-1,-1,-1]]))
+        """
+        return next(self.isomorphisms(other), None)
+
+
+    #TODO this is a hack, since we don't explicitly fix a standard map to P2
     def automorphisms_over_P2(self) -> Generator['Isomorphism', None, None]:
         """
         return all automorphisms of self that are permutations of exceptional configurations E[i]
@@ -384,6 +462,7 @@ class Surface(PicMarked):
                     yield Isomorphism(self, self, M)
             except ValueError:
                 continue
+
 
 
     def blowups_nonequivalent_over_P2(self, minus_one_only:bool=True) -> Generator[PicMap['Surface'], Any, None]:
@@ -463,6 +542,47 @@ class Isomorphism(PicMap[Surface]):
         elif isinstance(elem, Curve):
             return self.neg_curves_map[elem]
         elif isinstance(elem, ToricLatticeElement):
-            return super()(elem)
+            return super().__call__(elem)
         else:
             raise TypeError(f"type of elem must be a ToricLatticeElement, a Curve or a Point; got {type(elem)}")
+
+    @classmethod
+    def from_curve_images(cls, src: Surface, dest: Surface, curve_images: list[tuple[Curve, Curve]]) -> Self|None:
+        '''
+        return an isomorphism from src to dest that sends curves as in curve_images or None if the resulting isomorphism is not well-defined
+
+        the set of curves must be of full rank
+
+        INPUT:
+            - src -- source surface
+            - dest -- destination surface
+            - curve_images -- list of tuples, where each tuple is a pair of a source curve and its image
+
+        TESTS:
+            >>> S = Surface(6)
+            >>> src_curves = [S.curve("E_1"), S.curve("E_2"), S.curve("E_3"), S.K]
+            >>> dest_curves = [S.curve("L_{12}"), S.curve("L_{23}"), S.curve("L_{13}"), S.K]
+            >>> phi = Isomorphism.from_curve_images(S, S, list(zip(src_curves, dest_curves)))
+            >>> phi(S.curve("E_1"))
+            L_{12}
+        '''
+        src_as_cols = Matrix([c[0] for c in curve_images]).T
+        dest_as_cols = Matrix([c[1] for c in curve_images]).T
+        if src_as_cols.rank() != src.rank:
+            raise ValueError("the set of curves must be of full rank")
+        M = dest_as_cols * src_as_cols.pseudoinverse()
+        try:
+            M = M.change_ring(ZZ)
+        except (TypeError, ValueError):
+            return None
+        if abs(M.det()) != 1:
+            raise ValueError(f"the map matrix is not invertible, {M}")
+        try:
+            isom = cls(src, dest, M)
+        except (ValueError, TypeError): 
+            return None
+        if isom.check():
+            return isom
+
+    def __repr__(self) -> str:
+        return f"Isomorphism(\nsrc={self.src},\ndest={self.dest},\nmap=\n{self.map})"
