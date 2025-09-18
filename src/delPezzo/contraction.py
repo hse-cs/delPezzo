@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from functools import cache, cached_property
 from typing import Generator, Self, Sequence
 from delPezzo.picard import Curve, PicMap
-from delPezzo.surface import Surface
+from delPezzo.surface import Isomorphism, Surface
 
 @dataclass
 class Contraction(PicMap[Surface]):
@@ -22,12 +22,12 @@ class Contraction(PicMap[Surface]):
     E: a list of exceptional configurations, i.e., reducible (-1)-curves, which form an orthogonal basis of the span of the contracted curves. 
     C: a list of contracted (irreducible) curves in the same order as E.
     '''
-    E: tuple[Curve,...]
-    C: tuple[Curve,...]
+    C: list[Curve]
+    E: list[ToricLatticeElement]
     pullback_map: PicMap[Surface]
 
     @classmethod
-    def is_valid_contraction(cls, S:Surface, curves_to_contract: Sequence[ToricLatticeElement]) -> bool:
+    def is_valid_contraction(cls, S:Surface, curves_to_contract: Sequence[Curve]) -> bool:
         '''
         check if provided curves define a smooth contraction
 
@@ -43,13 +43,13 @@ class Contraction(PicMap[Surface]):
 
 
     @classmethod
-    def generate_CE(cls, S:Surface, curves_to_contract: Sequence[Curve]) -> tuple[tuple[Curve,...],tuple[ToricLatticeElement,...]]:
+    def generate_CE(cls, S:Surface, curves_to_contract: Sequence[Curve]) -> tuple[list[Curve],list[ToricLatticeElement]]:
         '''
-        return the tuple of contracted curves and correspondingly ordered tuple of pairwise orthogonal (-1)-classes
+        return the list of contracted curves and correspondingly ordered list of pairwise orthogonal (-1)-classes
 
         TESTS:
             >>> S = Surface(7, [[0,1,-1]]); Contraction.generate_CE(S, [S.curve('E_{12}'), S.curve('E_2')])
-            ((E_2, E_{12}), (N(0, 0, 1), N(0, 1, 0)))
+            ([E_2, E_{12}], [N(0, 0, 1), N(0, 1, 0)])
         '''
         CE_input = {c:c for c in curves_to_contract}
         CE_output = []
@@ -61,7 +61,7 @@ class Contraction(PicMap[Surface]):
             for c in CE_input.keys():
                 CE_input[c] = CE_input[c] + E*S.dot(CE_input[c],E)
         
-        return tuple(c for c,_ in CE_output), tuple(S.N(list(e)) for _,e in CE_output)
+        return [c for c,_ in CE_output], [S.N(list(e)) for _,e in CE_output]
 
 
     @classmethod
@@ -104,6 +104,41 @@ class Contraction(PicMap[Surface]):
         assert len(self.E) == len(self.C), f"{self.E} and {self.C} have different lengths"
         return self.E[self.C.index(c)]
 
+
+    def __call__(self, D: ToricLatticeElement|Curve) -> ToricLatticeElement|Curve:
+        '''
+        apply the map to the class or curve D
+
+        TESTS:
+            >>> S = Surface(6); sigma = Contraction.of_curves(S, [S.curve("E_1")]); sigma(S.curve("E_2"))
+            E_1
+            >>> S = Surface(6); sigma = Contraction.of_curves(S, [S.curve("L_{12}")]); c = sigma(S.curve("E_3")); c, type(c)
+            (N(0, 0, 1), delPezzo.picard.Curve)
+        '''
+        image = super().__call__(D)
+        image_curve = self.dest.curve(list(image))
+        if image_curve in self.dest.neg_curves:
+            return image_curve
+        else:
+            return image
+        
+
+
+    def strict_transform(self, curve_in_image:Curve)->Curve:
+        '''
+        return a strict transform of a negative curve
+
+        TESTS:
+            >>> S = Surface(6); sigma = Contraction.of_curves(S, [S.curve("L_{12}")])
+            >>> c = sigma(S.curve("E_3")); sigma.strict_transform(c)
+            E_3
+        '''
+        candidates = [c for c in self.src.neg_curves if self(c)==curve_in_image]
+        if len(candidates) != 1:
+            raise ValueError(f"did not find a negative curve that is a strict transform of {curve_in_image}")
+        return candidates[0]
+        
+
     def is_P2(self) -> bool:
         '''
         check if the contraction is onto P^2
@@ -114,8 +149,51 @@ class Contraction(PicMap[Surface]):
             >>> S = Surface(8); Contraction.of_curves(S, [S.curve('E_1')]).is_P2()
             True
         '''
-
         return len(self.C) == 9-self.src.degree
+
+    def __mul__(self, other: 'Contraction|Isomorphism | PicMap[Surface]') -> 'Contraction'|PicMap[Surface]:
+        '''
+        return a composition map of other map and self
+
+        TESTS:
+            >>> S1 = Surface(6); sigma1 = Contraction.of_curves(S1, [S1.curve("E_1")])
+            >>> S2 = sigma1.dest; sigma2 = Contraction.of_curves(S2,[sigma1(S1.curve("E_2"))])
+            >>> sigma2*sigma1
+            contraction of curves [E_2, E_1] on del Pezzo surface of degree 6
+            >>> phi = Isomorphism(S2,S2,Matrix([[1,0,0],[0,0,1],[0,1,0]]))
+            >>> sigma2*phi
+            contraction of curves [N(0, 0, 1)] on del Pezzo surface of degree 7
+        '''
+
+
+        if not isinstance(other, (Isomorphism, Contraction)):
+            return super().__mul__(other)
+
+        other_pullback_map = other.pullback_map if isinstance(other, Contraction) else PicMap[Surface](src=other.dest, dest=other.src, map=other.map.inverse())
+
+        E = [other_pullback_map(e) for e in self.E]
+
+        if isinstance(other, Contraction):
+            E += other.E
+            C = [other.strict_transform(c) for c in self.C] + list(other.C)
+        else:
+            C = [other_pullback_map(c) for c in self.C]
+
+        return Contraction(other.src, self.dest, self.map*other.map, C, E, other_pullback_map*self.pullback_map)
+
+    def __rmul__(self, other:Isomorphism) -> Self|PicMap[Surface]:
+        '''
+        return a composition map of an isomorphism and a contraction
+
+        TESTS:
+            >>> S1 = Surface(6); sigma1 = Contraction.of_curves(S1, [S1.curve("E_1")])
+            >>> S2 = sigma1.dest; sigma2 = Contraction.of_curves(S2,[sigma1(S1.curve("E_2"))])
+            >>> phi = Isomorphism(S2,S2,Matrix([[1,0,0],[0,0,1],[0,1,0]]))
+            >>> phi*sigma1
+            contraction of curves [E_1] on del Pezzo surface of degree 6
+        '''
+        other_pullback_map = PicMap[Surface](src=other.dest, dest=other.src, map=other.map.inverse())
+        return Contraction(self.src, other.dest, other.map*self.map, self.C, self.E, self.pullback_map*other_pullback_map)
 
     def __repr__(self) -> str:
         return f"contraction of curves {self.C} on {self.src}"

@@ -238,7 +238,7 @@ class Surface(PicMarked):
         input_curves = self.curve(input0), self.curve(input1)
         candidates = [p for p in self.points if all(c in p.curves for c in input_curves)]
         if len(candidates) != 1:
-            raise ValueError(f"Wrong number of candidate points ({len(candidates)}) on the intersection of {input}")
+            raise ValueError(f"Wrong number of candidate points ({len(candidates)}) on the intersection of {input_curves}")
         return candidates[0]
 
 
@@ -517,6 +517,14 @@ class Isomorphism(PicMap[Surface]):
         '''
         self.neg_curves_map = {c: self.dest.curve(super().__call__(c)) for c in self.src.neg_curves}
         self.points_map = {pt: self.dest.point(*tuple(self.neg_curves_map[c] for c in pt.curves)) for pt in self.src.points}
+
+    def __mul__(self, other: 'PicMap[Surface] | Isomorphism | Any') -> 'PicMap[Surface] | Isomorphism | Any':
+        if type(other) == Isomorphism:
+            return Isomorphism(self.src, other.dest, self.map*other.map)
+        elif type(other) == PicMap[Surface]:
+            return super().__mul__(other)
+        else:
+            return other.__rmul__(self) #type: ignore
 
     def check(self) -> bool:
         '''

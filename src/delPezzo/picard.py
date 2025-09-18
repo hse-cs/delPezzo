@@ -489,7 +489,7 @@ class PicMap[T: PicardLattice]:
         return dimensions_ok
 
 
-    def __mul__(self, other: Self) -> Self:
+    def __mul__(self, other: Self| 'PicMap[T]') -> 'PicMap[T]':
         
         '''
         return the composition of two maps
@@ -506,7 +506,7 @@ class PicMap[T: PicardLattice]:
         '''
         if other.dest != self.src:
             raise ValueError("These maps are not composable")
-        return self.__class__(src=other.src, dest=self.dest, map=self.map*other.map)
+        return PicMap[T](src=other.src, dest=self.dest, map=self.map*other.map)
     
     def __call__(self, D: ToricLatticeElement) -> ToricLatticeElement:
         '''
