@@ -7,9 +7,39 @@ from collections import Counter
 from sage.geometry.cone import ConvexRationalPolyhedralCone, Cone
 from sage.geometry.toric_lattice import ToricLatticeElement
 
-from .surface import Surface, Curve, Point
+from delPezzo.surface import Surface, Curve, Point
 #from .cone import NE_SubdivisionCone, relint_contains_relint
-from .contraction import Contraction, ContractionToPlane, candidate_zero_curves
+from delPezzo.contraction import Contraction, ContractionToPlane, candidate_zero_curves
+from delPezzo.surface2 import Stratum, Surface2
+
+
+@dataclass
+class Pencil:
+    '''
+    a pencil with rational irreducible fibers and at most one base point.
+
+    We assume that the fibers are smooth outside of the basepoint
+    '''
+    S: Surface2
+    pic_class: ToricLatticeElement
+    basepoint_locus: Stratum|None
+
+    def __post_init__(self):
+        self.pic_class.set_immutable()
+
+    def curves_in_fibers(self) -> list[Curve]:
+        '''
+        return negative curves in the element of self
+
+        TESTS:
+            >>> S = Surface2(6,[[1,-1,-1,-1]])
+            >>> P = Pencil(S, S.N([1,-1,0,0]))
+            >>> P.curves_in_fibers()
+            [E_1, E_2, E_3, E_4]
+        '''
+        return [c for c in self.S.neg_curves if c.dot(self.pic_class)<0]
+
+
 
 
 @dataclass(frozen=True)
@@ -46,10 +76,7 @@ class Cylinder:
     def Pol(self):
         return Cone(self.support)
 
-    @cached_property
-    def Forb(self):
-        return Cone(list(self.complement) + [-c for c in self.complement])
-
+    
     def is_polar_on(self, cone:ConvexRationalPolyhedralCone):
         return relint_contains_relint(self.Pol, cone)
     
@@ -187,7 +214,7 @@ class CylinderList(list):
     def Forb(self):
         if len(self) == 0 :
             return Cone([],lattice=self.S.N.dual()).dual()
-        return Cone(self.complement, lattice=self.S.N)
+        return Cone(list(self.complement) + [-c for c in self.complement], lattice=self.S.N)
 
     def is_polar_on(self, cone:ConvexRationalPolyhedralCone|str) -> bool:
         '''
@@ -303,164 +330,6 @@ class CylinderList(list):
 
 
 class CylinderGenerator:
-
-    #TODO make from bubble class (e.g., |L-p|)
-
-    # @classmethod
-    # def type_lines(cls=BubbleClass, S:'Surface')-> Generator['BubbleClass']:
-    #     '''
-    #         return list of all bubble classes of type (p,L) with a linear system |L-p| of dimension at least 1
-
-    #         The point p might be a double intersection of negative curves on S, a general point on a negative curve, or a general point on S. TODO: deal with triple intersections, e.g., in degree 3.
-    #     '''
-    #     for p in S.points:
-    #         if all(S.dot(S.L, curve) > 0 for curve in p.curves):
-    #             yield cls(S, [p], None, S.L-sum(p.curves, start=S.N([0]*S.degree)))
-
-    @classmethod
-    def make_cylinder_QT(cls, S, E_on_conic:Sequence[ToricLatticeElement], E_on_tangent:Sequence[ToricLatticeElement], E_on_fibers: list[Sequence[ToricLatticeElement]]|None = None)->'Cylinder':  
-        return Cylinder.make_type_tangent_weak(S.S, S, E_on_conic, E_on_tangent, E_on_fibers)
-
-    @classmethod
-    def find_cylinders_LL(cls, C:Contraction)->Generator['Cylinder',None,None]:
-        for class1, class2 in itertools.combinations_with_replacement(C.line_classes,2):
-            L1, dim_1 = class1
-            L2, dim_2 = class2
-            intersection = [C._E_to_C(e) for e in C.E if C.S.dot(e,L1)==1 and C.S.dot(e,L2)==1]
-            if len(intersection)>1:
-                continue
-            base_curves = [chain[0] for chain in C.chains_of_contracted_curves]
-            curves_on_other_fibers = [c for c in base_curves if C.S.dot(C._C_to_E(c),L1+L2)==0]
-            complement = list(C.C)
-            # we don't check the case when, say, fibers L12, L34 and L56 intersect in the same point (i.e., Echkardt point). Indeed, this case is automatically covered when generic flexibility is in question
-            support = list(C.C) + [L1, L2] + [C.L- C._C_to_E(c) for c in curves_on_other_fibers]
-            if dim_1 == 0:
-                complement.append(L1)
-            if dim_2 == 0:
-                complement.append(L2)
-            dimension = dim_1 + dim_2 if len(intersection) == 0 else 0
-            transversal = dimension>0 
-
-            basepoint = Point(frozenset([L1,L2])) if len(intersection)==0 else None
-            yield Cylinder.make(C.S, 
-                                        construction='lines',
-                                        contraction=C,
-                                        pencil_generators=(L1,L2),
-                                        complement=complement, 
-                                        support=support, 
-                                        fiber=2*C.L - sum(intersection), 
-                                        basepoint=basepoint,
-                                        transversal=transversal,
-                                        dimension=dimension)
-
-    @classmethod
-    def find_cylinders_QT(cls, S)->Generator['Cylinder',None,None]:
-        labels = ['Q','T','QT','F1','F2','F3','F4']
-        #TODO remove configs?
-        empty_config = {c:'' for c in S.C}
-        for Q, dim_Q in S.conic_classes:
-            for T, dim_T in S.line_classes:
-                config = empty_config.copy()
-                QT_is_linear = True
-                for c in S.C: 
-                    e = S._C_to_E(c)
-                    if S.S.dot(e,Q) == 1:
-                        config[c] = 'Q'
-                    if S.S.dot(e,T) == 1:
-                        config[c] += 'T'
-                intersection = [c for c,v in config.items() if v=='QT']                
-                dim_QT = dim_Q + dim_T
-                # if(dim_QT<=2):
-                #     ic(Q,T, config, dim_Q, dim_T, intersection)
-                if len(intersection)>2:
-                    continue
-                elif len(intersection)==2:
-                    c1,c2 = intersection
-                    if S.S.dot(c1,c2) != 1:
-                        continue
-                elif len(intersection) == 1:
-                    c = intersection[0]
-                    c_neighours = [d for d in S.C if S.S.dot(d,c)==1]
-                    if len(c_neighours)==1 and config[c_neighours[0]]!='':
-                            continue
-                    dim_QT -= 1
-                else:
-                    dim_QT -= 1
-                    QT_is_linear = False
-                
-                if dim_QT < 0:
-                    continue
-
-                transversal = dim_QT > 0 or not QT_is_linear
-                complement = list(S.C)
-                support = complement + [Q, T]                
-                if dim_Q == 0:
-                    complement.append(Q)
-                    if dim_QT == 0 and QT_is_linear:
-                        complement.append(T)
-                elif dim_T == 0:
-                    complement.append(T)
-                #TODO special fibers
-
-                basepoint = Point(frozenset([Q,T])) if len(intersection)==0 else None
-                yield Cylinder.make(S.S, 
-                                         complement=complement, 
-                                         support=support, 
-                                         construction='tangent',
-                                         contraction=S,
-                                         pencil_generators=(Q,T),
-                                         fiber=2*S.L - sum(intersection), 
-                                         basepoint=basepoint,
-                                         transversal=transversal,
-                                         dimension=dim_QT)
-
-
-    @classmethod
-    def cylinders(cls, S:Surface, contraction:Contraction, construction:str) -> Iterable['Cylinder']:
-        '''
-        S is the studied surface
-        E is the list of exceptional curves of a blowdown to P2
-        constructions is the list of names of methods to construct cylinders
-        '''
-        #TODO check each for arbitrary degree
-        #TODO which constructions are suitable for weak surfaces? LL and QT?
-        E = list(contraction.E) #TODO convert make_type_* to use Sequence instead of list
-        match construction:
-            case 'lines':
-                for e in E:
-                    yield Cylinder.make_type_lines(S, E, e)
-            case 'lines2':
-                if S.degree <= 5:
-                    for e1,e2,e3,e4 in itertools.combinations(E,int(4 )):
-                        yield Cylinder.make_type_lines2(S, E, e1, e2, e3, e4)
-                        yield Cylinder.make_type_lines2(S, E, e1, e3, e2, e4)
-                        yield Cylinder.make_type_lines2(S, E, e1, e4, e2, e3)
-            case 'tangent':
-                if S.degree >= 3:  
-                    for e in E:    
-                        yield Cylinder.make_type_tangent(S, E, E_on_conic=[f for f in E if f!=e], E_on_tangent=[e])
-            case 'P1xP1': 
-                if S.degree <= 7  and S.degree >= 3 :
-                    for Ei,Ej in itertools.permutations(E, int(2 )):
-                        yield Cylinder.make_type_P1xP1(S, E, Ei, Ej)
-            case 'cuspcubic':
-                if S.degree == 2 :
-                    for E_small in itertools.combinations(E,int(4 )):
-                        yield Cylinder.make_type_cuspcubic(S, E, E_small)
-            case 'LL':
-                yield from cls.find_cylinders_LL(contraction)
-            case 'QT':
-                yield from cls.find_cylinders_QT(contraction)
-            
-
-    @classmethod
-    def all_cylinders(cls, S: Surface, constructions: list[str]) -> Generator[Cylinder, None, None]:
-        for contraction in S.contractions_P2():
-            for construction in constructions:
-                yield from cls.cylinders(S, contraction, construction)
-    
-
-
     @classmethod
     def from_zero_classes(cls, C:ContractionToPlane)->'Generator[Cylinder,None,None]':
         '''

@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
+import itertools
 #from sage.all import *    #type: ignore
 # uncomment the above line for type checking in VSCode, or comment it for doctesting with `sage -python -m doctest combtypes.py`
 
 from sage.matrix.constructor import Matrix
 
 from delPezzo.surface import Isomorphism, Point, Curve, Surface
+from delPezzo.surface2 import Surface2
 from delPezzo.contraction import Contraction, ContractionToPlane
 from delPezzo.picard import PicMap
 
@@ -15,15 +17,10 @@ class CombType:
     
     An additional field `maps` allows to store maps from `representative` to representatives of other CombType objects
     '''
-
-    representative: Surface
-    other_surfaces: list[Isomorphism] = field(default_factory=list) #TODO remove?
+    representative: Surface2
+    other_surfaces_number: int = 0
     single_contractions: list[tuple[PicMap[Surface], 'CombType']] = field(default_factory=list)
     P2_contractions: list[PicMap[Surface]] = field(default_factory=list)
-    is_wdP: bool = field(init=False)
-
-    def __post_init__(self):
-        self.is_wdP = self.representative.is_weak_delPezzo
 
 class CombTypes:
     '''
@@ -48,8 +45,8 @@ class CombTypes:
         if negativity > 2:
             raise NotImplementedError("we cannot compute negative and zero curves for blowups")
         self.negativity = negativity
-        P2_type = CombType(representative=Surface(9))
-        Hirzebruch_types = [CombType(representative=Surface.Hirzebruch(r)) for r in range(0, self.negativity)]
+        P2_type = CombType(representative=Surface2(9))
+        Hirzebruch_types = [CombType(representative=Surface2.Hirzebruch(r)) for r in range(0, self.negativity+1)]
         self.comb_types_of_degree : dict[int,list[CombType]] = {9:[P2_type], 8: Hirzebruch_types}
 
         F1_type = Hirzebruch_types[1]
@@ -63,37 +60,41 @@ class CombTypes:
 
         self.contractions_populated_to_degree = 8
 
-    def compute_surfaces_in_degree(self, degree:int)->None:
+    def add(self, S: Surface)->None:
+        '''
+        add surface `S` to either existing CombType or a new 
+        
+        TESTS:
+            >>> CT = CombTypes(); CT.add(Surface(9)); len(CT.comb_types_of_degree[9])
+            1
+        '''
+        S=Surface2.convert_surface(S)
+        
+        if S.degree not in self.comb_types_of_degree.keys():
+            self.comb_types_of_degree[S.degree] = [CombType(representative=S)]
+            return
+        
+        candidate_ctypes = [ct for ct in self.comb_types_of_degree[S.degree] if ct.representative.singularity_type() == S.singularity_type()]
+        for ct in candidate_ctypes:
+            isom = ct.representative.isomorphism(S)
+            if isom != None:
+                ct.other_surfaces_number+=1
+                return
+
+        self.comb_types_of_degree[S.degree].append(CombType(representative=S))
+
+    def compute_degree(self, degree:int)->None:
         '''
         compute (weak) del Pezzo surfaces of given degree
         '''
         if degree in self.comb_types_of_degree.keys():
             return
-        self.compute_surfaces_in_degree(degree+1)
+        self.compute_degree(degree+1)
         
-        upper_representatives = [combtype.representative for combtype in self.comb_types_of_degree[degree+1]]
-        blowups = [blowup for S in upper_representatives for blowup in S.blowups_nonequivalent_over_P2(self.negativity)]
-        sing_types_of_blowups = set([blowup.dest.singularity_type() for blowup in blowups])
-        blowups_by_type = {sing_type: [blowup for blowup in blowups if blowup.dest.singularity_type()==sing_type] for sing_type in sing_types_of_blowups}
+        for combtype in self.comb_types_of_degree[degree+1]:
+            for contraction in combtype.representative.blowups_nonequivalent_over_P2(self.negativity):
+                self.add(contraction.src)
 
-        new_comb_types = []
-
-
-        for blowups_subset in blowups_by_type.values():
-            while len(blowups_subset)>0:
-                new_representative = blowups_subset.pop().dest
-                isomorphic_elements = []
-                blowups_to_remove = []
-                for b in blowups_subset:
-                    isom = new_representative.isomorphism(b.dest)
-                    if isom == None:
-                        continue
-                    isomorphic_elements.append(isom)
-                    blowups_to_remove.append(b)
-                for b in blowups_to_remove:             blowups_subset.remove(b)
-                new_comb_types.append(CombType(new_representative, isomorphic_elements))
-
-        self.comb_types_of_degree[degree] = new_comb_types
 
     #TODO construct from Lubbes' list here as a faster alternative. 
 
@@ -157,4 +158,5 @@ class CombTypes:
 
 
 if __name__ == "__main__":
-    CombTypes(6).populate_contractions(7)
+    CT = CombTypes()
+    CT.compute_degree(6)
