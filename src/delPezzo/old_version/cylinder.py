@@ -8,8 +8,10 @@ from sage.geometry.cone import ConvexRationalPolyhedralCone, Cone
 from sage.geometry.toric_lattice import ToricLatticeElement
 
 from .surface import Surface, Curve, Point
-#from .cone import NE_SubdivisionCone, relint_contains_relint
+from .cone import NE_SubdivisionCone, relint_contains_relint
 from .contraction import Contraction, ContractionToPlane, candidate_zero_curves
+
+Stratum = None | Curve | Point
 
 
 @dataclass(frozen=True)
@@ -42,15 +44,236 @@ class Cylinder:
             fiber.set_immutable()    
         return cls(S, construction, contraction, pencil_generators, tuple(complement), tuple(support), fiber, basepoint, transversal, dimension)
 
+
+    @classmethod
+    def make_type_lines(cls, S:Surface, E:list[Curve], e:Curve)->'Cylinder':
+        '''
+        We draw lines through image of e and image of one of E, for each of E.
+        Not suitable for weak surfaces.
+        '''
+        L = S.Line(E)
+        complement = list(E) + [L-e-f for f in E if f!=e]
+        return cls.make(S, complement, complement, L-e, construction='lines', transversal=False)
+
+    @classmethod
+    def make_type_lines2(cls, S:Surface, E:list[Curve], e1:Curve, e2:Curve, e3:Curve, e4:Curve)->'Cylinder':
+        '''
+        See Perepechko-2013, Section 3.1. 
+        e1, e2, e3, e4 are distinct members of E.
+        We draw lines L1 through images of e1 and e2 in P2, L2 through images of e3 and e4. Their images provide a pencil of lines, which gives a cylinder. Other members of E may be assumed to be in different singular fibers.
+        Not suitable for weak surfaces.
+        '''
+        others = [e for e in E if e!=e1 and e!=e2 and e!=e3 and e!=e4]
+        assert len(others) == len(E)-4 
+        L = S.Line(E)
+        lines = [L-e1-e2, L-e3-e4]
+        for l in lines:
+            l.set_immutable()
+        complement = list(E) + [L-e1-e2, L-e3-e4] + [L-e for e in others]
+        return cls.make(S, complement, complement, L, basepoint=Point(frozenset(lines)), construction='lines2', transversal = False)
+
+    @classmethod
+    def make_type_tangent(cls, S:Surface, E:list[Curve], E_on_conic:Sequence[Curve], E_on_tangent:Sequence[Curve], E_on_fibers: Sequence[Sequence[Curve]]|None = None)->'Cylinder':
+        '''
+        We draw a conic and a tangent on P2, and specify the positions of blown up points.
+
+        
+        Special case:
+        See Cheltsov-Park-Won Ex.4.1.2 and Perepechko Ex.5.2. 
+        We draw a conic through all blown up points but one, and a tangent line through the remaining one. 
+        Technically, for each e we obtain a collection of two cylinders for two tangents respectively. 
+        This pair has no common fibers.
+        '''
+        if E_on_fibers == None:
+            E_on_fibers = []
+        disjoint_subsets_of_E = [set(E_on_conic), set(E_on_tangent)] + [set(E_on_fiber) for E_on_fiber in E_on_fibers]
+        assert len(E) == sum(len(e) for e in disjoint_subsets_of_E) 
+        assert len(E) == len(set.union(*disjoint_subsets_of_E))
+        L = S.Line(E)
+        tangent = L - sum(e for e in E_on_tangent)
+        conic = 2*L - sum(e for e in E_on_conic)
+        support = list(E) + [conic, tangent] + [2*L - sum(E_on_fiber) for E_on_fiber in E_on_fibers]
+
+        # checks if there are at least two tangents through a given point. 
+        two_tangents_through_point = len(E_on_tangent)<=1 and all(len(E_on_fiber)<=1 for E_on_fiber in E_on_fibers)<=1
+
+        #fibers containing at least two Ei
+        special_fibers = [E_on_fiber for E_on_fiber in E_on_fibers if len(E_on_fiber)>1]
+
+        # there are at least two tangents such that there is a fiber containing two given points, see CPW Th.6.2.3
+        two_tangents_with_fiber_through_two_points = len(E_on_tangent)==0 and len(special_fibers)<=1 and all(len(E_on_fiber)<=2 for E_on_fiber in special_fibers)
+
+        if two_tangents_through_point or two_tangents_with_fiber_through_two_points:            
+            complement = list(E) + [conic]
+            transversal = True
+        else:
+            complement = support
+            transversal = None
+        return cls.make(S, complement, support, 2*L, construction='tangent', transversal=transversal)
+    
+    @classmethod
+    def make_type_tangent_weak(cls, S:Surface, contraction:Contraction, E_on_conic:Sequence[Curve], E_on_tangent:Sequence[Curve], E_on_fibers: list[Sequence[Curve]]|None = None)->'Cylinder':
+        '''
+        We draw a conic and a tangent on P2, and specify the positions of blown up points.
+
+        Parameters:
+            S: the surface
+            contraction: the chosen contraction to P2, i.e. a list of contracted curves.
+            E_on_Q: the minus-curves on conic Q
+            E_on_T: the minus-curves on tangent T. May intersect with E_on_conic.
+            E_on_fibers: for each fiber containing at least two minus-curves (except for the intersection of Q and T), there is a list of minus-curves on that fiber. Fibers containing one minus-curve can be omitted. The minus-curves on the intersection of Q and T are omitted.
+        
+        Remark:
+            Instead of (-2)-curves we operate with the corresponding reducible (-1)-curve, i..e., the total transform of a (-1)-curve. So, if E2 is inf. near of E1, and conic preimage contains E2, then it contains E1.
+        '''
+        if E_on_fibers == None:
+            E_on_fibers = []
+        
+        # TODO just provide classes of L, Q, T, Fi?
+        #TODO assertions: lines are in T and not in Q
+        assert all(e in contraction.E for e in itertools.chain(E_on_conic,E_on_tangent,*E_on_fibers))
+
+        L = S.Line(contraction.E)
+        tangent = L - sum(e for e in E_on_tangent)
+        conic = 2*L - sum(e for e in E_on_conic)
+        fibers = [2*L - sum(E_on_fiber) for E_on_fiber in E_on_fibers]
+        #fibers containing at least two Ei
+        special_fibers = [E_on_fiber for E_on_fiber in E_on_fibers if len(E_on_fiber)>1]
+
+        for e in contraction.E:
+            if S.dot(e,tangent)==0 and S.dot(e,conic)==0 and all(S.dot(e,fiber)==0 for fiber in E_on_fibers):
+                fibers.append(2*L - e)
+        pol_gens = list(contraction.contracted_curves) + [conic, tangent] + fibers
+        assert all(S.dot(c,e)<=1 for c in pol_gens for e in contraction.E)
+
+
+        # the dimension of the linear system of possible conics Q
+        dim_Q = 5 - len(E_on_conic)
+        # the dimension of the linear system of possible lines T (before the tangency condition)
+        dim_T = 2 - len(E_on_tangent)
+
+        if dim_Q<0 or dim_T<0:
+            raise ValueError('No cylinders exist')
+
+        # now we compute parameters for the moduli of (Q,T) with tangency condition
+
+        intersection_QT = [e for e in E_on_conic if e in E_on_tangent]
+        if len(intersection_QT)>2:
+            raise ValueError('Q and T have more than double intersection point')
+        elif len(intersection_QT)==2:
+            QT_is_linear = True
+            QT_dimension = dim_Q + dim_T
+        else:
+            QT_is_linear = False
+            QT_dimension = dim_Q + dim_T - 1
+
+        for fiber in special_fibers:
+            QT_dimension -= len(fiber) - 1
+            QT_is_linear = False
+
+        if QT_dimension<0:
+            raise ValueError('No cylinders exist')     
+        transversal = QT_dimension > 0 or not QT_is_linear
+        forb_gens = pol_gens if transversal else [c for c in pol_gens if c!=tangent]
+
+        # checks if there are at least two tangents through a given point. 
+        two_tangents_through_point = len(E_on_tangent)<=1 and all(len(E_on_fiber)<=1 for E_on_fiber in E_on_fibers)<=1
+        # there are at least two tangents such that there is a fiber containing two given points, see CPW Th.6.2.3
+        two_tangents_with_fiber_through_two_points = len(E_on_tangent)==0 and len(special_fibers)<=1 and all(len(E_on_fiber)<=2 for E_on_fiber in special_fibers)
+        if two_tangents_through_point or two_tangents_with_fiber_through_two_points:            
+            assert transversal == True
+
+        return cls.make(S, forb_gens, pol_gens, 2*L, construction='tangent', transversal=transversal, dimension = QT_dimension)
+
+    @classmethod
+    def make_type_tangent2(cls, S:Surface, E:list[Curve], E_on_conic:Sequence[Curve])->'Cylinder':
+        '''
+        See Perepechko-2013 Section 4.1. 
+        We draw a conic through blown up points at E_small and take a generic tangent line. 
+        Technically, we obtain a collection of cylinders with no common fibers.
+        '''
+        assert len(E_on_conic)<=5
+        return cls.make_type_tangent(S, E, E_on_conic, [], [[e] for e in E if e not in E_on_conic])
+
+
+    @classmethod
+    def make_type_P1xP1(cls, S:Surface, E:list[Curve], Ei,Ej)->'Cylinder':
+        '''
+        Cheltsov-Park-Won Example 4.1.6 and Lemma 4.2.2 for contraction of E1..E4, L-E5-E6 in degree 3. See also Perepechko Ex. 5.3.
+        This is again a pair of cylinders without common fibers.
+        #TODO can we use it for degree 2?
+        '''
+        assert S.degree<=7  and S.degree>=3 
+        assert Ei in E and Ej in E and Ei!=Ej
+        L = S.Line(E)
+        E_complement = [e for e in E if (e!=Ei) and (e!=Ej)]
+        conic = -S.K-L+Ei
+        complement = [e for e in E_complement]+[L-Ei-Ej, conic]
+        support = complement + [L-Ei,L-Ej]
+        return cls.make(S, complement, support, None, construction='P1xP1')
+
+    @classmethod
+    def make_type_cuspcubic(cls, S:Surface, E:list[Curve], E_small:Sequence[Curve])->'Cylinder':
+        '''
+        See Cheltsov-Park-Won Ex.4.1.13 and Th.6.2.2 case 2.
+        C is an anticanonical cuspidal curve, cubic on contraction to P^2 defined by (E minus E_small) and M.
+        We assume that there are at least two such curves (with distinct cusp points).
+        E_small defines the contraction from degree 5.
+        '''
+        assert S.degree >= 2  and S.degree <= 5
+        assert len(E_small) == 4 and all(e in E for e in E_small)
+        L = S.Line(E)
+        C = - S.K
+        M = [2*L-sum(E_small)] + [L-e for e in E_small]        
+        complement =  [e for e in E if e not in E_small] 
+        support = [C] + M + complement
+        fiber = 2*C
+        return cls.make(S, complement, support, fiber, construction='cuspcubic', transversal=True)
+
+
+    @classmethod
+    def make_type_cuspcubic2(cls, S:Surface, E:list[Curve], E_small:Sequence[Curve])->'Cylinder':
+        #TODO adapt for degree <=5
+        '''
+        See Cheltsov-Park-Won Ex.4.1.11.
+        '''
+        assert S.degree == 2 
+        assert len(E_small) == 4 
+        L = S.Line(E)
+        C = 3 *L-sum(E)
+        M = [2 *L-sum(E_small)] + [L-e for e in E_small]
+        support = [C] + M + E
+        complement = E
+        return cls.make(S, complement, support, None, construction='cuspcubic')
+
+    @classmethod
+    def make_type_cuspcubic_L12(cls, S:Surface, E:list[Curve], E_on_line:Sequence[Curve])->'Cylinder':
+        '''
+        See Cheltsov-Park-Won Th.6.2.2, Case 2.4
+        '''
+        assert S.degree >= 2 and S.degree <= 7
+        assert len(E_on_line) == 2 and all(e in E for e in E_on_line)
+        E_other = [e for e in E if e not in E_on_line]
+        L = S.Line(E)
+        C = 3 *L-sum(E)
+        L12 = L - sum(E_on_line)
+        F = [L-e for e in E_on_line]
+        complement = E_other + [L12]
+        support = complement + [C] + F
+        return cls.make(S, complement, support, 2*(F[0]+F[1]), construction='cuspcubic')
+
+
     @cached_property
     def Pol(self):
         return Cone(self.support)
 
     @cached_property
     def Forb(self):
-        return Cone(list(self.complement) + [-c for c in self.complement])
+        return Cone(self.complement)
 
-    def is_polar_on(self, cone:ConvexRationalPolyhedralCone):
+    def is_polar_on(self, cone:ConvexRationalPolyhedralCone|str):
+        if isinstance(cone, str):
+            cone = NE_SubdivisionCone.representative(self.S, cone).cone
         return relint_contains_relint(self.Pol, cone)
     
     def is_complete_on(self, cone:ConvexRationalPolyhedralCone, exclude:ConvexRationalPolyhedralCone|None=None):
