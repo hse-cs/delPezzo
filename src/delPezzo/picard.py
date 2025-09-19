@@ -286,8 +286,10 @@ class PicMarked(PicardLattice):
             N(0,  0,  1),
             N(1, -1, -1)
             in 3-d lattice N
-            >>> P1xP1 = PicMarked(Matrix([[0,1],[1,0]]),[[1,0],[0,1]], minus_one_curves_included=True)
-            2-d cone in 2-d lattice N
+            >>> P1xP1 = PicMarked(Matrix([[0,1],[1,0]]),[[1,0],[0,1]], minus_one_curves_included=True); P1xP1.NE.rays()
+            N(1, 0),
+            N(0, 1)
+            in 2-d lattice N
         '''
         super().__init__(Q)
         if NE_gens is None:
@@ -505,7 +507,7 @@ class PicMap[T: PicardLattice]:
             [1 0]
         '''
         if other.dest != self.src:
-            raise ValueError("These maps are not composable")
+            raise ValueError(f"These maps are not composable:", self, other)
         return PicMap[T](src=other.src, dest=self.dest, map=self.map*other.map)
     
     def __call__(self, D: ToricLatticeElement) -> ToricLatticeElement:

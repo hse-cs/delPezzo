@@ -1,3 +1,4 @@
+from delPezzo.contraction import Contraction
 from sage.all import *    #type: ignore
 # uncomment the above line for type checking in VSCode, or comment it for doctesting with `sage -python -m doctest surface.py`
 #from delPezzo.picard import *
@@ -14,7 +15,7 @@ from dataclasses import dataclass, field
 import itertools
 from functools import cached_property, cache
 from collections.abc import Generator, Sequence
-from typing import Any, Callable, Optional, TypeVar, Self
+from typing import Any, Callable, TypeVar, Self
 
 
 
@@ -62,14 +63,14 @@ class Point:
         '''
         return len(self.curves) == 2 and all(c.dot(c)<0 for c in self.curves) and self.curves[0].dot(self.curves[1]) == 1
 
-    def is_minus_one(self) -> bool:
+    def negativity(self) -> int:
         '''
-        check if the point lies on the intersection of (-1)-curves
+        return the minimum of indices of curves meeting the point
         
         TESTS:
-            >>> Surface(6,[[1,-1,-1,-1]]).points[0].is_minus_one()
-            False
-            >>> sum(pt.is_minus_one() for pt in Surface(6,[[0,1,-1,0]]).points)
+            >>> Surface(6,[[1,-1,-1,-1]]).points[0].negativity()
+            2
+            >>> sum(pt.negativity()==-1 for pt in Surface(6,[[0,1,-1,0]]).points)
             2
         '''
         return self.curves[0].dot(self.curves[0]) == -1 and self.curves[1].dot(self.curves[1]) == -1
@@ -113,6 +114,7 @@ def eq_class_representatives(permutations:list[Callable[[T],T]], objects:list[T]
         orbit = [p(next_object) for p in permutations]
         remaining_objects = [o for o in remaining_objects if o not in orbit]
 
+#TODO move blowups to subclass?
 
 class Surface(PicMarked): 
     r'''
@@ -136,7 +138,6 @@ class Surface(PicMarked):
         - points -- a list of intersection points of negative curves under assumption that no triple intersections occur
         - is_delPezzo -- a boolean indicating whether the surface is del Pezzo
         - is_weak_delPezzo -- a boolean indicating whether the surface is a (possibly weak) del Pezzo
-
     '''
     def __init__(self, degree:int, NE_gens:Sequence[ToricLatticeElement|list[int]]|None=None, extra:dict[str,str]|None=None, Q:Matrix_integer_dense|None=None, K:list[int]|None=None, minus_one_curves_included:bool=False) -> None:
         '''
@@ -153,6 +154,12 @@ class Surface(PicMarked):
         TESTS:
             >>> Surface(6)
             del Pezzo surface of degree 6
+            >>> Surface(9).NE_gens
+            [L]
+            >>> Surface(8).NE_gens
+            [L_1, E_1]
+            >>> Surface(7).NE_gens
+            [E_1, E_2, L_{12}]
         '''
         self.degree = degree
         if self.degree<1  or self.degree>9 :
@@ -163,6 +170,12 @@ class Surface(PicMarked):
         if Q == None or K == None:
             Q = diagonal_matrix([1]+[-1]*blowups)
             K = [-3] + [1]*blowups
+            if blowups == 0:
+                NE_gens = [[1]]
+                minus_one_curves_included = True
+            if blowups == 1:
+                NE_gens = [[1,-1],[0,1]]
+                minus_one_curves_included = True                
         else:
             assert Q.rank()==blowups+1, "wrong degree"
         super().__init__(Q, NE_gens, minus_one_curves_included   )
@@ -185,6 +198,18 @@ class Surface(PicMarked):
         #from delPezzo.cone import NE_SubdivisionCone
         #self.NE = NE_SubdivisionCone.NE(self)
 
+
+    @classmethod
+    def Hirzebruch(cls, r:int) -> Self:
+        '''
+        return Hirzebruch surface F_r
+
+        TESTS:
+            >>> Surface.Hirzebruch(2)
+            weak del Pezzo surface of degree 8 with singularities ('A1',)
+             (-2)-curves: [N(0, 1)]
+        '''
+        return cls(8, NE_gens=[[1,0],[0,1]], Q=Matrix([[0,1],[1,-r]]), K=[r+2,2], minus_one_curves_included=True)
 
     @cached_property
     def minus_two_curves(self) -> list[Curve]: 
@@ -242,20 +267,20 @@ class Surface(PicMarked):
         return candidates[0]
 
 
-    def blowup(self, curves: Sequence[Curve|ToricLatticeElement|list[int]]) -> PicMap['Surface']:
+    def blowup(self, curves: Sequence[Curve|ToricLatticeElement|list[int]]) -> Contraction:
         '''
-        return the blowup of this surface at a point lying on provided negative curves (in the quantity of 0, 1 or 2) as a map from self to the new surface
+        return the blowup of this surface at a point lying on provided negative curves (in the quantity of 0, 1 or 2) as a contraction to self from the new surface
 
         ARGUMENTS:
             - ``curves`` -- a list of negative curves that contain the blown up point
         
         TESTS:
             >>> S = Surface(6,[[1,-1,-1,-1]])
-            >>> S.blowup([[0,1,0,0]])(S.N([1,2,3,4]))
+            >>> S.blowup([[0,1,0,0]]).pullback_map(S.N([1,2,3,4]))
             N(1, 2, 3, 4, 0)
-            >>> S.blowup([]).dest.minus_two_curves
+            >>> S.blowup([]).src.minus_two_curves
             [L_{123}]
-            >>> S.blowup([[0,1,0,0]]).dest.minus_two_curves
+            >>> S.blowup([[0,1,0,0]]).src.minus_two_curves
             [L_{123}, E_{14}]
         '''
         resulting_neg_curves = [
@@ -265,15 +290,18 @@ class Surface(PicMarked):
         ]
         new_surface = Surface(self.degree-1, resulting_neg_curves)
         map_matrix = identity_matrix(QQ, self.rank+1)[:,:-1]
-        return PicMap[Surface](self, new_surface, map_matrix)
+        e = new_surface.curve([0]*self.rank+[1])
+        blowup = PicMap[Surface](self, new_surface, map_matrix)
+        contraction = Contraction(new_surface, self, map_matrix.T, [e],[e], blowup)
+        return contraction
 
 
-    def blowups(self, minus_one_only:bool=True) -> Generator['PicMap[Surface]', None, None]:
+    def blowups(self, negativity:int=2) -> Generator[Contraction, None, None]:
         '''
         return all blowups of this surface as maps to generated surfaces
         
         ARGUMENTS:
-            - ``minus_one_only`` -- if True, only return blowups at points outside of curves of self-intersection <=-2
+            - ``negativity`` -- the minimal allowed self-intersection of negative curves
 
         TESTS:
             >>> len(list(Surface(6,[[1,-1,-1,-1]]).blowups()))
@@ -288,12 +316,8 @@ class Surface(PicMarked):
         '''
         if self.degree<=3:
             raise NotImplementedError
-        if minus_one_only:
-            sets_of_curves_to_transform = [[]] + [[c] for c in self.minus_one_curves]  + [pt.curves for pt in self.points if pt.is_minus_one()]
-        else:
-            sets_of_curves_to_transform = [[]] + [[c] for c in self.neg_curves] + [pt.curves for pt in self.points]
-        for transformed_curves in sets_of_curves_to_transform:
-            yield self.blowup(transformed_curves)
+        for strata in self.strata(negativity):
+            yield self.blowup(strata)
 
 
 
@@ -401,6 +425,18 @@ class Surface(PicMarked):
             new_dest_candidates = [c for c in destination_candidates if c != i]
             yield from self._complete_partial_isomorphism_with(other, new_partial, new_src_candidates, new_dest_candidates)
 
+    def is_P1xP1(self)->bool:
+        '''
+        check if self is the direct product of projective lines
+        
+        TESTS:
+            >>> Surface(6).is_P1xP1()
+            False
+            >>> Surface(9).is_P1xP1()
+            False
+        '''
+        return all(self.dot(c,c)==0 for c in self.NE_gens)
+
     def isomorphisms(self, other: 'Surface') -> Generator['Isomorphism', None, None]:
         """
         return all isomorphisms from self to other
@@ -408,10 +444,12 @@ class Surface(PicMarked):
         TESTS:
             >>> S = Surface(6); len(list(S.isomorphisms(S)))
             12
+            >>> S = Surface(8); len(list(S.isomorphisms(S)))
+            1
         """
-        # we assume that negative curves span the lattice
         if self.rank <= 2:
-            raise NotImplementedError
+            yield from self._complete_partial_isomorphism_with(other, [], self.NE_gens, other.NE_gens)
+            return
         
         max_subset = self.disjoint_subsets_of_max_size(self.minus_one_curves)[0]
         for other_max_subset in other.disjoint_subsets_of_max_size(other.minus_one_curves):
@@ -439,7 +477,7 @@ class Surface(PicMarked):
         return next(self.isomorphisms(other), None)
 
 
-    #TODO this is a hack, since we don't explicitly fix a standard map to P2
+    #TODO this is a hack, since we don't explicitly fix a standard map to P2. Sometimes we do, through parent
     def automorphisms_over_P2(self) -> Generator['Isomorphism', None, None]:
         """
         return all automorphisms of self that are permutations of exceptional configurations E[i]
@@ -466,12 +504,23 @@ class Surface(PicMarked):
 
 
 
-    def blowups_nonequivalent_over_P2(self, minus_one_only:bool=True) -> Generator[PicMap['Surface'], Any, None]:
+    def strata(self, negativity:int=2) -> list[list[Curve]]:
+        '''
+        return possible loci for a point on `self` w.r.t. negative curves as a list of negative curves passing through it
+
+        TESTS:
+            >>> Surface(7).strata()
+        '''
+        return [[]] + [[c] for c in self.neg_curves if c.dot(c)>-negativity] + [list(pt.curves) for pt in self.points if pt.negativity()>-negativity]
+
+    def blowups_nonequivalent_over_P2(self, negativity:int=2) -> Generator[Contraction, Any, None]:
         '''
         return representatives of equivalence classes of blowups of self under automorphisms over P2
         
+        we assume all negative curves to be smooth
+
         ARGUMENTS:
-            - ``minus_one_only`` -- if True, only return blowups at points outside of curves of self-intersection <=-2
+            - ``negativity`` -- a boundary on the self-intersection number of strict transforms of negative curves
 
         TESTS:
             >>> [blowup.dest.minus_two_curves for blowup in Surface(7).blowups_nonequivalent_over_P2()]
@@ -482,12 +531,8 @@ class Surface(PicMarked):
             raise NotImplementedError
         yield self.blowup([])
         automorphisms = list(self.automorphisms_over_P2())
-        if minus_one_only:
-            curve_representatives = eq_class_representatives(automorphisms, self.minus_one_curves)
-            point_representatives = eq_class_representatives(automorphisms, [pt for pt in self.points if pt.is_minus_one()])
-        else:
-            curve_representatives = eq_class_representatives(automorphisms, self.neg_curves)
-            point_representatives = eq_class_representatives(automorphisms, self.points)
+        curve_representatives = eq_class_representatives(automorphisms, [c for c in self.neg_curves if c.dot(c)>-negativity])
+        point_representatives = eq_class_representatives(automorphisms, [p for p in self.points if p.negativity()>-negativity])
         for c in curve_representatives:
             yield self.blowup([c])
         for pt in point_representatives:
@@ -548,12 +593,10 @@ class Isomorphism(PicMap[Surface]):
         '''
         if isinstance(elem, Point):
             return self.points_map[elem]
-        elif isinstance(elem, Curve):
+        elif isinstance(elem, Curve) and self.src.dot(elem,elem)<0:
             return self.neg_curves_map[elem]
-        elif isinstance(elem, ToricLatticeElement):
-            return super().__call__(elem)
         else:
-            raise TypeError(f"type of elem must be a ToricLatticeElement, a Curve or a Point; got {type(elem)}")
+            return super().__call__(elem)
 
     @classmethod
     def from_curve_images(cls, src: Surface, dest: Surface, curve_images: list[tuple[Curve, Curve]]) -> Self|None:

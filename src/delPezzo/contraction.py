@@ -1,3 +1,4 @@
+#from sage.all import *
 
 import itertools
 from sage.geometry.toric_lattice import ToricLatticeElement
@@ -75,13 +76,17 @@ class Contraction(PicMap[Surface]):
 
         TESTS:
             >>> S = Surface(5); Contraction.of_curves(S, [S.curve('E_1')])
-            contraction of curves (E_1,) on del Pezzo surface of degree 5
+            contraction of curves [E_1] on del Pezzo surface of degree 5
+            >>> S = Surface(8); e = S.curve('E_1'); Contraction.of_curves(S, [e]).dest.NE_gens
+            [L]
+            >>> S = Surface(7); e = S.curve('E_1'); Contraction.of_curves(S, [e]).dest.NE_gens
+            [E_1, L_1]
         """
         assert cls.is_valid_contraction(S, curves_to_contract=curves_to_contract), 'not a contraction'
         
         C, E = cls.generate_CE(S, curves_to_contract)
-
-        E_perp = Cone([S._N_to_M(ray) for e in E for ray in [e,-e]]).dual().span()
+        E_perp_as_cone = Cone([S._N_to_M(ray) for e in E for ray in [e,-e]]).dual()
+        E_perp = E_perp_as_cone.span()
         A = Matrix(E_perp.basis()).T
         M = (A.T*S.Q*A).inverse()*A.T*S.Q # projection matrix
         #print("A,M:",A,M)
@@ -90,8 +95,10 @@ class Contraction(PicMap[Surface]):
         except TypeError as e:
             print(e, M)
         Q = A.T*S.Q*A
-        neg_curve_images = [M*c for c in S.neg_curves]
-        dest = Surface(S.degree + len(curves_to_contract), neg_curve_images, Q=Q, K=list(M*S.K), minus_one_curves_included=True)
+        #NE_images = [M*c for c in S.NE_gens]
+        dest_NE = S.NE.intersection(E_perp_as_cone)
+        dest_NE_gens = [M*r for r in dest_NE.rays()]
+        dest = Surface(S.degree + len(curves_to_contract), dest_NE_gens, Q=Q, K=list(M*S.K), minus_one_curves_included=True)
         pullback_map = PicMap[Surface](src=dest, dest=S, map=A)
         contraction = cls(src=S, dest=dest, map=M, E=E, C=C, pullback_map=pullback_map)
         return contraction
@@ -112,8 +119,8 @@ class Contraction(PicMap[Surface]):
         TESTS:
             >>> S = Surface(6); sigma = Contraction.of_curves(S, [S.curve("E_1")]); sigma(S.curve("E_2"))
             E_1
-            >>> S = Surface(6); sigma = Contraction.of_curves(S, [S.curve("L_{12}")]); c = sigma(S.curve("E_3")); c, type(c)
-            (N(0, 0, 1), delPezzo.picard.Curve)
+            >>> S = Surface(6); sigma = Contraction.of_curves(S, [S.curve("L_{12}")]); c = sigma(S.curve("E_3")); c, isinstance(c, Curve)
+            (N(0, 0, 1), True)
         '''
         image = super().__call__(D)
         image_curve = self.dest.curve(list(image))
@@ -179,7 +186,9 @@ class Contraction(PicMap[Surface]):
         else:
             C = [other_pullback_map(c) for c in self.C]
 
-        return Contraction(other.src, self.dest, self.map*other.map, C, E, other_pullback_map*self.pullback_map)
+        return self.__class__(other.src, self.dest, self.map*other.map, C, E, other_pullback_map*self.pullback_map)
+
+    #TODO check if ContractionToPlane * Contraction = ContractionToPlane
 
     def __rmul__(self, other:Isomorphism) -> Self|PicMap[Surface]:
         '''
@@ -193,7 +202,7 @@ class Contraction(PicMap[Surface]):
             contraction of curves [E_1] on del Pezzo surface of degree 6
         '''
         other_pullback_map = PicMap[Surface](src=other.dest, dest=other.src, map=other.map.inverse())
-        return Contraction(self.src, other.dest, other.map*self.map, self.C, self.E, self.pullback_map*other_pullback_map)
+        return self.__class__(self.src, other.dest, other.map*self.map, self.C, self.E, self.pullback_map*other_pullback_map)
 
     def __repr__(self) -> str:
         return f"contraction of curves {self.C} on {self.src}"
@@ -231,7 +240,13 @@ class ContractionToPlane(Contraction):
         
         TESTS:
             >>> S = Surface(7); ContractionToPlane.of_curves(S, [S.curve("E_1"),S.curve("E_2")])
-            ContractionToPlane(src=del Pezzo surface of degree 7, dest=del Pezzo surface of degree 5, map=[1 0 0], E=(N(0, 1, 0), N(0, 0, 1)), C=(E_1, E_2))
+            ContractionToPlane(src=del Pezzo surface of degree 7, dest=del Pezzo surface of degree 9, map=[1 0 0], C=[E_1, E_2], E=[N(0, 1, 0), N(0, 0, 1)], pullback_map=PicMap(
+                src=del Pezzo surface of degree 9,
+                dest=del Pezzo surface of degree 7,
+                map=
+                [1]
+                [0]
+                [0]))
             >>> S = Surface(6); ContractionToPlane.of_curves(S, [S.curve("E_1"),S.curve("E_2")])
             Traceback (most recent call last):
                 ...
@@ -262,7 +277,7 @@ class ContractionToPlane(Contraction):
         return classes of rational zero curves on `src`
 
         TESTS:
-            >>>  S = Surface(7); C=ContractionToPlane.of_curves(S, [S.curve("E_1"),S.curve("E_2")]); C.zero_classes()
+            >>> S = Surface(7); C=ContractionToPlane.of_curves(S, [S.curve("E_1"),S.curve("E_2")]); C.zero_classes()
             [N(1, -1, 0), N(1, 0, -1)]
         '''
         S = self.src
