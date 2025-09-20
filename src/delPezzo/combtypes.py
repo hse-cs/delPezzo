@@ -221,4 +221,10 @@ if __name__ == "__main__":
     CT = CombTypes(precompute_degree=5)
     #CT.populate_P2_contractions()
     G,pos = CT.graph()
+    def edge_label(u,v):
+        m = G.number_of_edges(u,v)
+        return m if m>1 else ""
+    edge_labels = {(u,v,):edge_label(u,v)
+             for u,v in G.edges()}
+    nx.draw_networkx_edge_labels(G,pos,edge_labels=edge_labels)
     nx.draw(G,pos, labels={p:'.'.join(p.singularity_type()) for p in G.nodes})
