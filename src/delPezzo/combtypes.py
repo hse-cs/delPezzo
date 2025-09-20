@@ -1,8 +1,11 @@
 from dataclasses import dataclass, field
 import itertools
+from typing import Generator
+import networkx as nx
 #from sage.all import *    #type: ignore
 # uncomment the above line for type checking in VSCode, or comment it for doctesting with `sage -python -m doctest combtypes.py`
 
+from delPezzo.cylinder import Cylinder
 from sage.matrix.constructor import Matrix
 
 from delPezzo.surface import Isomorphism, Point, Curve, Surface
@@ -19,8 +22,14 @@ class CombType:
     '''
     representative: Surface2
     other_surfaces_number: int = 0
-    single_contractions: list[tuple[PicMap[Surface], 'CombType']] = field(default_factory=list)
-    P2_contractions: list[PicMap[Surface]] = field(default_factory=list)
+    single_contractions: list[tuple[Contraction, 'CombType']] = field(default_factory=list)
+    P2_contractions: list[ContractionToPlane] = field(default_factory=list)
+    blowups: list[Contraction] = field(default_factory=list)
+    cylinders : list[Cylinder] = field(default_factory=list)
+
+    def __repr__(self)->str:
+        return f"CombType(\nrepresentative={self.representative},\nother={self.other_surfaces_number},single_con={len(self.single_contractions)},P2_con={len(self.P2_contractions)},blowups={len(self.blowups)},cyl={len(self.cylinders)})"
+
 
 class CombTypes:
     '''
@@ -31,11 +40,11 @@ class CombTypes:
         - `contractions_populated_to_degree` -- contractions are computed up to this degree
 
     TESTS:
-        >>> len(CombTypes(6).comb_types_of_degree[6])
+        >>> len(CombTypes(precompute_degree=6).comb_types_of_degree[6])
         6
     '''
 
-    def __init__(self, negativity: int=2):
+    def __init__(self, negativity: int=2, precompute_degree:int=8):
         '''
         INPUT:
             - `negativity` -- the minimal allowed self-intersection of negative curves
@@ -53,17 +62,22 @@ class CombTypes:
         F1 = Hirzebruch_types[1].representative
         P2 = P2_type.representative
         E = F1.neg_curves[0]
-        pullback_map = PicMap[Surface](src=P2, dest=F1, map=Matrix([[1, 0]]))
-        F1_P2_map = ContractionToPlane(src=F1, dest=P2, map=Matrix([[1],[0]]), C=[E], E=[E], pullback_map=pullback_map)
+        pullback_map = PicMap[Surface](src=P2, dest=F1, map=Matrix([[1], [0]]))
+        F1_P2_map = ContractionToPlane(src=F1, dest=P2, map=Matrix([[1,0]]), C=[E], E=[E], pullback_map=pullback_map)
         F1_type.single_contractions.append((F1_P2_map, P2_type))
         F1_type.P2_contractions.append(F1_P2_map)
 
         self.contractions_populated_to_degree = 8
+        if precompute_degree<8:
+            self.compute_degree(precompute_degree)
 
-    def add(self, S: Surface)->None:
+
+    def add(self, S: Surface, contraction: Contraction|None=None, upper:CombType|None=None)->None:
         '''
-        add surface `S` to either existing CombType or a new 
+        add surface `S` to either existing CombType or a new one
         
+        if contraction and upper combtype are present, we add it to the list of single contractions of self and of blowups of upper
+
         TESTS:
             >>> CT = CombTypes(); CT.add(Surface(9)); len(CT.comb_types_of_degree[9])
             1
@@ -71,17 +85,27 @@ class CombTypes:
         S=Surface2.convert_surface(S)
         
         if S.degree not in self.comb_types_of_degree.keys():
-            self.comb_types_of_degree[S.degree] = [CombType(representative=S)]
-            return
+            self.comb_types_of_degree[S.degree] = []
         
         candidate_ctypes = [ct for ct in self.comb_types_of_degree[S.degree] if ct.representative.singularity_type() == S.singularity_type()]
+        isom = None
         for ct in candidate_ctypes:
             isom = ct.representative.isomorphism(S)
             if isom != None:
                 ct.other_surfaces_number+=1
-                return
+                combtype = ct
+                break
+        else:            
+            combtype = CombType(representative=S)
+            self.comb_types_of_degree[S.degree].append(combtype)
 
-        self.comb_types_of_degree[S.degree].append(CombType(representative=S))
+        if contraction != None and upper != None:
+            if isom != None:
+                contraction = contraction * isom #type: ignore
+            combtype.single_contractions.append((contraction, upper)) #type: ignore
+            upper.blowups.append(contraction) #type: ignore
+        
+
 
     def compute_degree(self, degree:int)->None:
         '''
@@ -93,18 +117,27 @@ class CombTypes:
         
         for combtype in self.comb_types_of_degree[degree+1]:
             for contraction in combtype.representative.blowups_nonequivalent_over_P2(self.negativity):
-                self.add(contraction.src)
+                self.add(contraction.src, contraction, combtype)
 
 
-    #TODO construct from Lubbes' list here as a faster alternative. 
+    #TODO construct from Lubbes' list here as a faster alternative?
 
+    def populate_P2_contractions(self)->None:
+        '''
+        compute the list of contractions to P^2 for every combinatorial type if it is empty
+        '''
+        for degree in self.comb_types_of_degree.keys():
+            for combtype in self.comb_types_of_degree[degree]:
+                if combtype.P2_contractions == []:
+                    self._populate_P2_contractions_of_combtype(combtype)
 
+    #TODO remove as deprecated
     def populate_contractions(self, degree:int) -> None:
         '''
         compute contractions of combinatorial types of a given degree, both single (of one (-1)-curve) and to P^2
 
         TESTS:
-            >>> C = CombTypes(6); C.populate_contractions(7)
+            >>> C = CombTypes(precompute_degree=6); C.populate_contractions(7)
         '''
         if self.contractions_populated_to_degree <= degree:
             return
@@ -117,7 +150,7 @@ class CombTypes:
 
         self.contractions_populated_to_degree = degree
 
-
+        #TODO remove as unused
     def  _populate_single_contractions_of_combtype(self, combtype: CombType)->None:
         '''
         populate contractions of a single (-1)-curve of `combtype`
@@ -157,6 +190,35 @@ class CombTypes:
                     combtype.P2_contractions.append(composition)
 
 
+    def __getitem__(self, degree:int)->list[CombType]:
+        return self.comb_types_of_degree[degree]
+
+    def __repr__(self) -> str:
+        return f"CombTypes{self.comb_types_of_degree.__repr__()}"
+
+    def descending_order(self) -> Generator[CombType, None, None]:
+        '''
+        yield all combtypes in self from top degree to bottom
+        '''
+        for degree in sorted(self.comb_types_of_degree.keys(),reverse=False):
+            for combtype in self[degree]:
+                yield combtype
+
+    def graph(self):
+        G = nx.MultiDiGraph()
+        pos = dict()
+        for combtype in self.descending_order():
+            G.add_node(combtype.representative)
+            for _, upper_combtype in combtype.single_contractions:
+                G.add_edge(combtype.representative, upper_combtype.representative)
+        for d in self.comb_types_of_degree.keys():
+            for i,combtype in enumerate(self.comb_types_of_degree[d]):
+                pos[combtype.representative] = (i,d)
+        return G, pos
+        
+
 if __name__ == "__main__":
-    CT = CombTypes()
-    CT.compute_degree(6)
+    CT = CombTypes(precompute_degree=5)
+    #CT.populate_P2_contractions()
+    G,pos = CT.graph()
+    nx.draw(G,pos, labels={p:'.'.join(p.singularity_type()) for p in G.nodes})

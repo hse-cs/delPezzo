@@ -12,7 +12,7 @@ from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice
 
 
 from dataclasses import dataclass
-from functools import cache, cached_property
+from functools import cache, cached_property, singledispatch, singledispatchmethod
 from typing import Generator, Self, Sequence
 from delPezzo.picard import Curve, PicMap
 from delPezzo.surface import Isomorphism, Surface
@@ -158,7 +158,8 @@ class Contraction(PicMap[Surface]):
         '''
         return len(self.C) == 9-self.src.degree
 
-    def __mul__(self, other: 'Contraction|Isomorphism | PicMap[Surface]') -> 'Contraction'|PicMap[Surface]:
+    @singledispatchmethod
+    def __mul__(self, other):
         '''
         return a composition map of other map and self
 
@@ -171,42 +172,64 @@ class Contraction(PicMap[Surface]):
             >>> sigma2*phi
             contraction of curves [N(0, 0, 1)] on del Pezzo surface of degree 7
         '''
+        return other.__rmul__(self)
 
+    @__mul__.register
+    def _(self, other: Isomorphism):
+        other_pullback_map = PicMap[Surface](src=other.dest, dest=other.src, map=other.map.inverse())
+        return self.__class__(
+            other.src, 
+            self.dest, 
+            self.map*other.map, 
+            [other_pullback_map(c) for c in self.C], 
+            [other_pullback_map(c) for c in self.E], 
+            other_pullback_map*self.pullback_map
+            )
 
-        if not isinstance(other, (Isomorphism, Contraction)):
-            return super().__mul__(other)
+    @singledispatchmethod
+    def __rmul__(self, other):
+        return super().__rmul__(self)
 
-        other_pullback_map = other.pullback_map if isinstance(other, Contraction) else PicMap[Surface](src=other.dest, dest=other.src, map=other.map.inverse())
-
-        E = [other_pullback_map(e) for e in self.E]
-
-        if isinstance(other, Contraction):
-            E += other.E
-            C = [other.strict_transform(c) for c in self.C] + list(other.C)
-        else:
-            C = [other_pullback_map(c) for c in self.C]
-
-        return self.__class__(other.src, self.dest, self.map*other.map, C, E, other_pullback_map*self.pullback_map)
-
-    #TODO check if ContractionToPlane * Contraction = ContractionToPlane
-
-    def __rmul__(self, other:Isomorphism) -> Self|PicMap[Surface]:
+    @__rmul__.register
+    def _(self, other:Isomorphism) -> Self:
         '''
         return a composition map of an isomorphism and a contraction
 
         TESTS:
             >>> S1 = Surface(6); sigma1 = Contraction.of_curves(S1, [S1.curve("E_1")])
             >>> S2 = sigma1.dest; sigma2 = Contraction.of_curves(S2,[sigma1(S1.curve("E_2"))])
-            >>> phi = Isomorphism(S2,S2,Matrix([[1,0,0],[0,0,1],[0,1,0]]))
+            >>> phi2 = Isomorphism(S2,S2,Matrix([[1,0,0],[0,0,1],[0,1,0]]))
             >>> phi*sigma1
             contraction of curves [E_1] on del Pezzo surface of degree 6
+            >>> sigma2*phi
+            contraction of curves [N(0, 0, 1)] on del Pezzo surface of degree 7
         '''
         other_pullback_map = PicMap[Surface](src=other.dest, dest=other.src, map=other.map.inverse())
         return self.__class__(self.src, other.dest, other.map*self.map, self.C, self.E, self.pullback_map*other_pullback_map)
 
     def __repr__(self) -> str:
         return f"contraction of curves {self.C} on {self.src}"
-    
+
+
+
+#TODO make ContractionToPlane * Contraction = ContractionToPlane
+
+@Contraction.__mul__.register #type: ignore
+def _(self, other: Contraction) -> Contraction:
+    other_pullback_map = other.pullback_map
+    E = [other_pullback_map(e) for e in self.E] + other.E
+    C = [other.strict_transform(c) for c in self.C] + list(other.C)
+    return type(self)(
+        other.src, 
+        self.dest, 
+        self.map*other.map, 
+        C, 
+        E, 
+        other_pullback_map*self.pullback_map
+    )
+
+
+
 @cache
 def candidate_zero_curves(degree:int) -> Sequence[ToricLatticeElement]:
     '''

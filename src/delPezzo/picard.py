@@ -7,7 +7,7 @@ from sage.rings.rational_field import QQ
 from sage.geometry.toric_lattice import ToricLatticeElement, ToricLattice, ToricLattice_ambient
 from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_rays
 import itertools
-from functools import cached_property, cache
+from functools import cached_property, cache, singledispatchmethod
 from collections.abc import Generator, Sequence
 import textwrap
 from sage.rings.integer_ring import ZZ
@@ -152,7 +152,7 @@ class Curve(ToricLatticeElement):
         else:
             raise ValueError(f"Curve {name} not found in negative curves")
 
-    def dot(self, other:'Curve') -> int:
+    def dot(self, other:'Curve|ToricLatticeElement') -> int:
         '''
         return the self-intersection number of this curve and the other one
 
@@ -490,7 +490,7 @@ class PicMap[T: PicardLattice]:
         #if isinstance(self.src, PicMarked) and isinstance(self.dest, PicMarked): #TODO check that curves go to curves? no, the image may be reducible or non-negative
         return dimensions_ok
 
-
+    @singledispatchmethod
     def __mul__(self, other: Self| 'PicMap[T]') -> 'PicMap[T]':
         
         '''
@@ -510,6 +510,10 @@ class PicMap[T: PicardLattice]:
             raise ValueError(f"These maps are not composable:", self, other)
         return PicMap[T](src=other.src, dest=self.dest, map=self.map*other.map)
     
+    @singledispatchmethod
+    def __rmul__(self, other: 'PicMap[T]') -> 'PicMap[T]':
+        return self.__class__.__mul__(other,self)
+
     def __call__(self, D: ToricLatticeElement) -> ToricLatticeElement:
         '''
         apply the map to the divisor class D

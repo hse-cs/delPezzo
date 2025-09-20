@@ -4,6 +4,7 @@
 from delPezzo.picard import Curve, PicMap, PicMarked
 from delPezzo.cone import Cone_relint
 
+from numpy import single
 from sage.matrix.constructor import matrix, Matrix
 from sage.matrix.matrix_integer_dense import Matrix_integer_dense
 from sage.matrix.special import diagonal_matrix, identity_matrix
@@ -13,7 +14,7 @@ from sage.combinat.root_system.cartan_matrix import  CartanMatrix
 from sage.rings.integer_ring import ZZ
 from dataclasses import dataclass, field
 import itertools
-from functools import cached_property, cache
+from functools import cached_property, cache, singledispatchmethod
 from collections.abc import Generator, Sequence
 from typing import Any, Callable, TypeVar, Self
 
@@ -467,13 +468,13 @@ class Isomorphism(PicMap[Surface]):
         self.neg_curves_map = {c: self.dest.curve(super().__call__(c)) for c in self.src.neg_curves}
         self.points_map = {pt: self.dest.point(*tuple(self.neg_curves_map[c] for c in pt.curves)) for pt in self.src.points}
 
-    def __mul__(self, other: 'PicMap[Surface] | Isomorphism | Any') -> 'PicMap[Surface] | Isomorphism | Any':
-        if type(other) == Isomorphism:
-            return Isomorphism(self.src, other.dest, self.map*other.map)
-        elif type(other) == PicMap[Surface]:
-            return super().__mul__(other)
-        else:
-            return other.__rmul__(self) #type: ignore
+    @singledispatchmethod
+    def __mul__(self, other):
+        return other.__rmul__(self) 
+
+    # @__mul__.register
+    # def _(self, other: PicMap) -> PicMap[Surface]:
+    #     return super().__mul__(other)
 
     def check(self) -> bool:
         '''
@@ -483,7 +484,8 @@ class Isomorphism(PicMap[Surface]):
         point_check = len(self.src.points) == len(self.dest.points)
         return super_check and point_check
 
-    def __call__(self, elem: ToricLatticeElement | Curve | Point):
+    @singledispatchmethod
+    def __call__(self, elem):
         '''
         return image of a divisor class, a negative curve or a point
 
@@ -495,12 +497,23 @@ class Isomorphism(PicMap[Surface]):
             >>> phi(S.point("E_1","L_{12}"))
             Point(E_2, L_{12})
         '''
-        if isinstance(elem, Point):
-            return self.points_map[elem]
-        elif isinstance(elem, Curve) and self.src.dot(elem,elem)<0:
+        raise ValueError(f"unknown input type {type(elem)} of {elem}")
+
+    @__call__.register
+    def _(self, elem: Point) -> Point:
+        return self.points_map[elem]
+
+    @__call__.register
+    def _(self, elem: Curve) -> Curve | ToricLatticeElement:
+        if self.src.dot(elem,elem)<0:
             return self.neg_curves_map[elem]
         else:
             return super().__call__(elem)
+
+
+    @__call__.register
+    def _(self, elem: ToricLatticeElement) -> ToricLatticeElement:
+        return super().__call__(elem)
 
     @classmethod
     def from_curve_images(cls, src: Surface, dest: Surface, curve_images: list[tuple[Curve, Curve]]) -> Self|None:
@@ -542,3 +555,8 @@ class Isomorphism(PicMap[Surface]):
 
     def __repr__(self) -> str:
         return f"Isomorphism(\nsrc={self.src},\ndest={self.dest},\nmap=\n{self.map})"
+
+
+@Isomorphism.__mul__.register
+def _(self, other: Isomorphism) -> Isomorphism:
+    return Isomorphism(self.src, other.dest, self.map*other.map)
