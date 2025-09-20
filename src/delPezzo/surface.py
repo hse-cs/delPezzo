@@ -2,6 +2,7 @@
 # uncomment the above line for type checking in VSCode, or comment it for doctesting with `sage -python -m doctest surface.py`
 #from delPezzo.picard import *
 from delPezzo.picard import Curve, PicMap, PicMarked
+from delPezzo.cone import Cone_relint
 
 from sage.matrix.constructor import matrix, Matrix
 from sage.matrix.matrix_integer_dense import Matrix_integer_dense
@@ -83,7 +84,11 @@ class Point:
             >>> P = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
             >>> Point.by_names(P, "E_2", "L_{12}") == Point.by_names(P, "L_{12}", "E_2")
             True
+            >>> Point.by_names(P, "E_2", "L_{12}") == None
+            False
         '''
+        if other is None:
+            return False
         return self.curves == other.curves or self.curves[::-1] == other.curves
 
 
@@ -266,7 +271,7 @@ class Surface(PicMarked):
     @cached_property
     def Ample(self):
         print("Warning: void usage of Ample in favor of NE") # reason: NE has 240 rays in degree 1, and Ample has around 20k rays.
-        return self.dual_cone(self.NE.cone)
+        return Cone_relint(self.dual_cone(self.NE.cone))
 
     @cache
     def singularity_type(self) -> tuple[str,...]:

@@ -161,7 +161,7 @@ class Curve(ToricLatticeElement):
             >>> C.dot(C) 
             0
         '''
-        if self.Pic != other.Pic:
+        if isinstance(other, Curve) and self.Pic != other.Pic:
             raise ValueError("The curves must be in the same Picard lattice")
         product = self.Pic.dot(other, self)
         return product

@@ -118,6 +118,7 @@ class Surface2(Surface):
         """
         return -min([c.dot(c) for c in self.neg_curves], default=0)
 
+
     def blowup(self, curves: Sequence[Curve|ToricLatticeElement|list[int]]) -> Contraction:
         '''
         return the blowup of this surface at a point lying on provided negative curves (in the quantity of 0, 1 or 2) as a contraction to self from the new surface
