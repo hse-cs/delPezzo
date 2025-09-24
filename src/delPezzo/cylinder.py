@@ -3,9 +3,10 @@ from dataclasses import dataclass
 import itertools
 from functools import cached_property
 from collections import Counter
+from abc import ABC, abstractmethod
 
-from attr import field
 from delPezzo.cone import Cone_relint
+from numpy import isin
 from sage.geometry.cone import ConvexRationalPolyhedralCone, Cone
 from sage.geometry.toric_lattice import ToricLatticeElement
 
@@ -15,90 +16,66 @@ from delPezzo.contraction import Contraction, ContractionToPlane, candidate_zero
 from delPezzo.surface2 import Stratum, Surface2
 
 
-@dataclass(frozen=True)
-class Pencil:
+class PreCylinder(ABC):
     '''
-    a pencil with rational irreducible fibers and at most one base point.
-
-    We assume that the fibers are smooth outside of the basepoint
+    a precylinder is a collection of cylinders that are equivalent in some way
     '''
-    S: Surface
-    pic_class: ToricLatticeElement
-    basepoint_locus: Stratum|None = None
-    check: bool = True
+    @property
+    @abstractmethod
+    def S(self) -> Surface:
+        '''
+        return the surface this precylinder is on
+        '''
+        ...
 
-    def __post_init__(self):
-        self.pic_class.set_immutable()
-        if self.check and not self._check():
-            raise ValueError(f'{self} is not valid')
+    @property
+    @abstractmethod
+    def pic_class(self) -> ToricLatticeElement:
+        '''
+        return the class of a general cylinder fiber 
+        '''
+        ...
+
+    @abstractmethod
+    def _check(self) -> bool:
+        ...
 
     @cached_property
-    def curves_in_fibers(self) -> tuple[Curve,...]:
+    def complement(self) -> list[Curve]:
         '''
-        return negative curves in the element of self
-
-        TESTS:
-            >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> Pencil(S, S.N([1,-1,0,0])).curves_in_fibers
-            (L_{123}, E_2, E_3)
+        return the complement to the precylinder
         '''
-        return tuple(c for c in self.S.neg_curves if c.dot(self.pic_class)==0)
+        return self._complement()
 
-    def _check(self) -> bool:
+    @abstractmethod
+    def _complement(self) -> list[Curve]:
+        ...
+
+    @abstractmethod
+    def Pol(self) -> Cone_relint:
         '''
-        check some correctness conditions
-
-        namely, a zero class has no basepoint and vice versa; negative class is impossible; no fixed component present (i.e., is nef)
-        
-        TESTS:
-            >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> Pencil(S, S.N([1,-1,0,0]))._check()
-            True
-            >>> Pencil(S, S.N([1,-1,-1,0]),check=False)._check()
-            False
-            >>> Pencil(S, S.N([1,0,0,0]),check=False)._check()
-            False
-            >>> Pencil(S, S.N([1,0,0,0]), Stratum([]))._check()
-            True
-            >>> Pencil(S, S.N([1,0,0,0]), Stratum([S.curve("E_1")]),check=False)._check()
-            False
+        return the polarity cone
         '''
-        
-        if any(self.S.dot(c,self.pic_class)<0 for c in self.S.NE_gens):
-            return False
+        ...
 
-        self_intersection = self.S.dot(self.pic_class, self.pic_class)
-        if self_intersection < 0:
-            return False
-        elif self_intersection == 0:
-            return self.basepoint_locus is None
-        else:
-            if self.basepoint_locus is None:
-                return False 
-            return all(c.dot(self.pic_class)>0  for c in self.basepoint_locus.curves)
-
-    def is_fibration(self) -> bool:
+    def is_polar_on(self, cone:ConvexRationalPolyhedralCone) -> bool:
         '''
-        check if self is a fibration (i.e., elements are disjoint)
-
-        TESTS:
-            >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> Pencil(S, S.N([1,-1,0,0])).is_fibration()
-            True
-            >>> Pencil(S, S.N([1,0,0,0]), Stratum([])).is_fibration()
+        check if self is polar on the relative interior of the given cone
         '''
-        return self.basepoint_locus is None
-    
-
+        return self.Pol().contains_relint(cone)
 
 @dataclass(frozen=True)
-class Cylinder(Pencil):
-    '''
-    a class of a cylinder
+class FibrationCylinder(PreCylinder):
+    _S: Surface
+    zero_class: ToricLatticeElement
+    section: Curve
+    check: bool = True
 
-    if the pencil is a fibration, then we need to specify a section curve; we restrict to negative sections
-    '''
-    section : Curve|None = None
+
+    def __post_init__(self):
+        self.zero_class.set_immutable()
+        if self.check and not self._check():
+            raise ValueError(f'{self} is not valid')
 
     def _check(self) -> bool:
         '''
@@ -106,82 +83,123 @@ class Cylinder(Pencil):
 
         TESTS:
             >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> Cylinder(S, S.N([1,-1,0,0]),check=False)._check()
+            >>> FibrationCylinder(S, S.N([1,-1,0,0]),section=S.curve("E_2"),check=False)._check()
             False
-            >>> Cylinder(S, S.N([1,-1,0,0]),section=S.curve("E_1"))._check()
+            >>> FibrationCylinder(S, S.N([1,-1,0,0]),section=S.curve("E_1"))._check()
             True
         '''
-        if not super()._check():
+        # zero class
+        if self.S.dot(self.pic_class, self.pic_class)!=0:
+            return False                
+        # section
+        if self.S.dot(self.pic_class, self.section)!=1:
             return False
-        if self.is_fibration():
-            if self.section is None:
-                return False
-            if self.S.dot(self.pic_class, self.section)!=1:
-                return False
-
-        #TODO check that fibers are rational, irreducible, smooth?
+        # nef
+        if not all(self.S.dot(c,self.pic_class)>0 for c in self.S.NE_gens): 
+            return False 
+        # rational
+        if self.S.dot(self.S.K, self.pic_class)!=-2:
+            return False
         return True
 
-    @cached_property
-    def complement(self) -> tuple[Curve,...]:
+    def curves_in_fibers(self) -> tuple[Curve,...]:
         '''
-        return negative curves in the complement of self
-        
+        return negative curves in the element of self
+
         TESTS:
             >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> Cylinder(S, S.N([1,-1,0,0]),section=(S.curve("E_1"),)).complement
-            (L_{123}, E_2, E_3, E_1)
+            >>> FibrationCylinder(S, S.N([1,-1,0,0]),section=(S.curve("E_1"),)).curves_in_fibers
+            (L_{123}, E_2, E_3)
         '''
-        if self.section is None:
-            return self.curves_in_fibers
-        else:
-            return self.curves_in_fibers + (self.section,)
+        return tuple(c for c in self.S.neg_curves if c.dot(self.pic_class)==0)
 
-    @cached_property
+
+    @property
+    def S(self) -> Surface:
+        return self._S
+
+    @property
+    def pic_class(self) -> ToricLatticeElement:
+        return self.zero_class
+
+    def _complement(self) -> list[Curve]:
+        return [self.section] + list(self.curves_in_fibers())
+    
     def Pol(self) -> Cone_relint:
         '''
         return the cone of Q-divisors H such that self is H-polar
 
         TESTS:
             >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> cyl = Cylinder(S, S.N([1,-1,0,0]),section=(S.curve("E_1"),))
-            >>> cyl.Pol.contains_relint(S.N([1,0,0,0]))
+            >>> cyl = FibrationCylinder(S, S.N([1,-1,0,0]),section=(S.curve("E_1"),))
+            >>> cyl.Pol().contains_relint(S.N([1,0,0,0]))
             True
         '''
         return Cone_relint(self.complement)
 
-    def is_polar_on(self, other:Cone_relint|ToricLatticeElement):
+    def is_minimal(self) -> bool:
         '''
-        check if self is polar on divisor classes in other
+        check if self cannot be reduced to a contraction
+        '''
+        return all(c.dot(c)!=-1 for c in self.curves_in_fibers())
 
-        TESTS:
-            >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> cyl = Cylinder(S, S.N([1,-1,0,0]),section=(S.curve("E_1"),))
-            >>> cyl.is_polar_on(S.N([1,0,0,0]))
-            True
-        '''
-        return self.Pol.contains_relint(other)
+@dataclass(frozen=True)
+class FibrationCylinderImage(PreCylinder):
+    contraction: Contraction
+    fibration: FibrationCylinder
+    check: bool = True
+
+
+    def __post_init__(self):
+        if self.check and not self._check():
+            raise ValueError(f'{self} is not valid')
+
+    def _check(self) -> bool:
+        if not self.fibration._check():
+            return False
+        if self.contraction.src != self.fibration.S:
+            return False
+        return True
+
+    @property
+    def S(self) -> Surface:
+        return self.contraction.dest
     
-    # def is_complete_on(self, cone:ConvexRationalPolyhedralCone, exclude:ConvexRationalPolyhedralCone|None=None):
-    #     '''
-    #     checks if the collection is H-complete for ample divisor classes H from the relative interior of cone
-    #     exclude is a cone of divisors to be excluded from completeness check
-    #     '''
-    #     intersection = cone.intersection(self.Forb)
-    #     if not relint_contains_relint(cone, intersection):
-    #         return True
-    #     if exclude == None:
-    #         return False
-    #     forb_intersection_excluded = all(exclude.contains(ray) for ray in intersection.rays())
-    #     return forb_intersection_excluded
 
+    def _complement_images(self) -> list[Curve]:
+        '''
+        classes of images of curves in the complement of the fibration
+        '''
+        return [self.contraction(c) for c in self.fibration.complement]
 
-class CylinderList(list[Cylinder]):
+    def _complement(self) -> list[Curve]:
+        '''
+        the complement consists of images of curves that stayed negative
+        '''
+        return [c for c in self._complement_images() if self.S.dot(c,c) < 0]
+
+    def Pol(self) -> Cone_relint:
+        '''
+        return the polarity cone
+        '''
+        return Cone_relint(self._complement_images())
+
+    @property
+    def pic_class(self) -> ToricLatticeElement:
+        return self.contraction(self.fibration.pic_class)
+
+    #TODO Why do we have one?
+    def basepoint_locus(self) -> Stratum|None:
+        neg_curves_meeting_section = [c for c in self.contraction.src.neg_curves if self.contraction.src.dot(c, self.fibration.section) == 0]
+        negative_images = [self.contraction(c) for c in neg_curves_meeting_section if self.S.dot(c,c) < 0]
+        return Stratum(tuple(negative_images))
+
+class CylinderList(list[PreCylinder]):
     '''
     A list of cylinders with extra info.
     '''
 
-    def __init__(self, cylinders:Iterable[Cylinder], S:Surface|None=None, check:bool=True) -> None:
+    def __init__(self, cylinders:Iterable[PreCylinder], S:Surface|None=None, check:bool=True) -> None:
         super().__init__(cylinders)
         if len(self)==0  and S==None:
             raise ValueError('The surface is not defined')
@@ -193,13 +211,13 @@ class CylinderList(list[Cylinder]):
     def _check(self) -> bool:
         return all(cyl._check() for cyl in self)
 
-    def _check_cylinder(self, cylinder:Cylinder) -> Cylinder:
+    def _check_cylinder(self, cylinder:PreCylinder) -> PreCylinder:
         '''
-        check if cylinder is on the correct surface
+        check if precylinder is on the correct surface
         '''
-        if not isinstance(cylinder, Cylinder):
+        if not isinstance(cylinder, PreCylinder):
             #print(type(cylinder), cylinder.S)
-            raise TypeError(f'{cylinder} is not a Cylinder')
+            raise TypeError(f'{cylinder} is not a PreCylinder')
         if cylinder.S != self.S:
             raise ValueError(f'{cylinder} is defined on another surface')
         return cylinder
@@ -211,7 +229,7 @@ class CylinderList(list[Cylinder]):
 
         TESTS:
             >>> S = Surface2(6,[[1,-1,-1,-1]])
-            >>> cyl1 = Cylinder(S, S.N([1,-1,0,0]),section=(S.curve("E_1"),))
+            >>> cyl1 = FibrationCylinder(S, S.N([1,-1,0,0]),section=(S.curve("E_1"),))
             >>> cyl2 = Cylinder(S, S.N([1,0,0,0]),basepoint_locus=Stratum([]))
             >>> len(CylinderList([cyl1]) + CylinderList([cyl2]))
             2
@@ -246,7 +264,6 @@ class CylinderList(list[Cylinder]):
             >>> (clist == copy) and (not clist is copy)
             True
         '''
-
         return CylinderList(super().copy(), self.S)
 
     # def insert(self, index, item):
@@ -295,7 +312,7 @@ class CylinderList(list[Cylinder]):
         for cylinder in self:
             result = result.intersection(cylinder.Pol)
         interior_element = sum(result.rays())
-        if all(c.Pol.contains_relint(interior_element) for c in self):
+        if all(c.Pol().contains_relint(interior_element) for c in self):
             return Cone_relint(result)
         else:
             return Cone_relint(Cone([],lattice=self.S.N))
@@ -310,6 +327,8 @@ class CylinderList(list[Cylinder]):
         if len(self) == 0:
             return Cone([],lattice=self.S.N.dual()).dual()
         complement = self.complement()
+        if len(complement) == 0:
+            return Cone([],lattice=self.S.N)
         opposite_vector = - sum(complement) # the Forb is actually a subspace?
         return Cone(list(complement) + [opposite_vector], lattice=self.S.N)
 
@@ -358,14 +377,20 @@ class CylinderList(list[Cylinder]):
     def is_transversal(self):
         '''
         check if self is transversal
+
+        
         '''
         if len(self) == 0:
             return False
         pic_class = self[0].pic_class
         if not all(c.pic_class == pic_class for c in self[1:]):
             return True
-        if pic_class.self_intersection == 0:
+        if isinstance(self[0], FibrationCylinder):
             return False
+        
+        #if isinstance(self[0], FibrationCylinderImage):
+        return False
+        #TODO we should check further
         basepoint_locus = self[0].basepoint_locus
         if not all(c.basepoint_locus == basepoint_locus for c in self[1:]):
             return True
@@ -411,6 +436,9 @@ class CylinderList(list[Cylinder]):
         '''
         return cylinders that come from P1-fibrations on the surface `C.src`
         
+        TESTS:
+            >>> S=Surface(7); C=ContractionToPlane.of_curves(S, [S.curve(f"E_{i}") for i in range(1,3)])
+            >>>  CylinderList.from_zero_classes(C)
         '''
         S = C.src
         curves = [c for c in candidate_zero_curves(S.degree) if all(S.dot(e,c)>=0 for e in S.neg_curves)]
@@ -423,3 +451,13 @@ class CylinderList(list[Cylinder]):
                     section=section
                     ))
         return cls(result)
+
+
+        #TODO descend fibrations by contracting sections and curves in fibers passing through basepoint
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()
+
+

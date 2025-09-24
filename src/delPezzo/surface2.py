@@ -38,9 +38,21 @@ class Stratum:
         TESTS:
             >>> P = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
             >>> Stratum.by_names(P, ["E_2", "L_{12}"])
-            Stratum([E_2, L_{12}])
+            Stratum((E_2, L_{12}))
         '''
         return cls(tuple(Curve.get_named(P, c) for c in curves), check=check)
+
+    @classmethod
+    def from_pt(cls, pt: Point) -> Self:
+        '''
+        make a stratum from a point
+
+        TESTS:
+            >>> P = PicMarked(diagonal_matrix([1,-1,-1]), [[0,1,-1]])
+            >>> Stratum.from_pt(Point.by_names(P, "E_2", "L_{12}"))
+            Stratum((E_2, L_{12}))
+        '''
+        return cls(pt.curves)
 
     def _check(self) -> bool:
         '''
@@ -91,7 +103,7 @@ class Stratum:
 
         TESTS:
             >>> Stratum.from_pt(Surface(6,[[1,-1,-1,-1]]).points[0]).dim()
-            2
+            0
         '''
         return 2-len(self.curves)
 
@@ -119,7 +131,7 @@ class Surface2(Surface):
         return -min([c.dot(c) for c in self.neg_curves], default=0)
 
 
-    def blowup(self, curves: Sequence[Curve|ToricLatticeElement|list[int]]) -> Contraction:
+    def blowup(self, curves: Stratum|Sequence[Curve|ToricLatticeElement|list[int]]) -> Contraction:
         '''
         return the blowup of this surface at a point lying on provided negative curves (in the quantity of 0, 1 or 2) as a contraction to self from the new surface
 
@@ -135,6 +147,8 @@ class Surface2(Surface):
             >>> S.blowup([[0,1,0,0]]).src.minus_two_curves
             [L_{123}, E_{14}]
         '''
+        if isinstance(curves, Stratum): 
+            curves = curves.curves
         resulting_neg_curves = [
             list(c) + [0] for c in self.neg_curves if c not in curves and c.dot(c)<=-2
             ] + [
@@ -148,7 +162,7 @@ class Surface2(Surface):
         return contraction
 
 
-    def strata(self, blowup_negativity:int=2) -> list[list[Curve]]: #TODO output Stratum
+    def strata(self, blowup_negativity:int=2) -> list[Stratum]: 
         '''
         return possible loci for a point on `self` w.r.t. negative curves as a list of negative curves passing through it
 
@@ -156,15 +170,16 @@ class Surface2(Surface):
             - ``blowup_negativity`` -- the minimal allowed self-intersection of negative curves after the blowup (under assumption that negative curves are smooth)
         
         TESTS:
-            >>> Surface2(7).strata()
-            [[], [E_1], [E_2], [L_{12}], [E_1, L_{12}], [E_2, L_{12}]]
-            >>> Surface2(7,[[0,1,-1]]).strata(1)
-            [[], [E_{12}, E_2], [E_2, L_{12}]]
+            >>> [p.curves for p in Surface2(7).strata()]
+            [(), (E_1,), (E_2,), (L_{12},), (E_1, L_{12}), (E_2, L_{12})]
+            >>> [p.curves for p in Surface2(7,[[0,1,-1]]).strata(2)]
+            [(), (E_2,), (L_{12},), (E_2, L_{12})]
         '''
-        return [[]] + [[c] for c in self.neg_curves if c.dot(c)>-blowup_negativity] + [list(pt.curves) for pt in self.points if pt.negativity()<blowup_negativity]
+        curve_lists = [[]] + [[c] for c in self.neg_curves if c.dot(c)>-blowup_negativity] + [list(pt.curves) for pt in self.points if pt.negativity()<blowup_negativity]
+        return [Stratum(tuple(curves)) for curves in curve_lists]
 
 
-    def blowups(self, blowup_negativity:int=2) -> Generator[Contraction, None, None]:
+    def blowups(self, blowup_negativity:int=2) -> list[Contraction]:
         '''
         return all blowups of this surface as maps to generated surfaces
         
@@ -176,18 +191,26 @@ class Surface2(Surface):
             4
             >>> len(list(Surface2(7,[[0,1,-1]]).blowups()))
             4
-            >>> [len(phi.dest.minus_two_curves) for phi in Surface2(7,[[0,1,-1]]).blowups()]
+            >>> [len(phi.src.minus_two_curves) for phi in Surface2(7,[[0,1,-1]]).blowups()]
             [1, 2, 2, 3]
             >>> S = Surface2(9)
-            >>> list(S.blowups())[0](Curve.make(S,[1]))
+            >>> list(S.blowups())[0].pullback_map(Curve.make(S,[1]))
             N(1, 0)
         '''
         if self.degree<=3:
             raise NotImplementedError
-        for stratum in self.strata(blowup_negativity):
-            yield self.blowup(stratum)
+        return [self.blowup(stratum) for stratum in self.strata(blowup_negativity)]
 
 
+    def single_contractions(self) -> list[Contraction]:
+        '''
+        return all contractions of a (-1)-curve of self
+
+        TESTS:
+            >>> Surface2.Hirzebruch(1).single_contractions()
+            [contraction of curves [N(0, 1)] on del Pezzo surface of degree 8]
+        '''
+        return [Contraction.of_curves(self, [c]) for c in self.minus_one_curves]
 
     def blowups_nonequivalent_over_P2(self, blowup_negativity:int=2) -> Generator[Contraction, Any, None]:
         '''
@@ -213,3 +236,8 @@ class Surface2(Surface):
             yield self.blowup([c])
         for pt in point_representatives:
             yield self.blowup(pt.curves)
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()

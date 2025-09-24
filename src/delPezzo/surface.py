@@ -4,6 +4,8 @@
 from delPezzo.picard import Curve, PicMap, PicMarked
 from delPezzo.cone import Cone_relint
 
+from networkx import adjacency_matrix
+from sage.geometry.cone import Cone, ConvexRationalPolyhedralCone, normalize_rays
 from numpy import single
 from sage.matrix.constructor import matrix, Matrix
 from sage.matrix.matrix_integer_dense import Matrix_integer_dense
@@ -12,6 +14,8 @@ from sage.rings.rational_field import QQ
 from sage.geometry.toric_lattice import ToricLatticeElement
 from sage.combinat.root_system.cartan_matrix import  CartanMatrix
 from sage.rings.integer_ring import ZZ
+from sage.graphs.graph import Graph
+
 from dataclasses import dataclass, field
 import itertools
 from functools import cached_property, cache, singledispatchmethod
@@ -118,6 +122,8 @@ def eq_class_representatives(permutations:list[Callable[[T],T]], objects:list[T]
         yield next_object
         orbit = [p(next_object) for p in permutations]
         remaining_objects = [o for o in remaining_objects if o not in orbit]
+
+SurfaceLabel = tuple[int,str,int]
 
 class Surface(PicMarked): 
     r'''
@@ -270,9 +276,55 @@ class Surface(PicMarked):
 
 
     @cached_property
-    def Ample(self):
-        print("Warning: void usage of Ample in favor of NE") # reason: NE has 240 rays in degree 1, and Ample has around 20k rays.
-        return Cone_relint(self.dual_cone(self.NE.cone))
+    def Ample(self) -> Cone_relint:
+        '''
+        return the (open) ample cone of self
+        
+        '''
+        if self.degree <= 3:
+            print("Warning: void usage of Ample in favor of NE") # reason: NE has 240 rays in degree 1, and Ample has around 20k rays.
+        return Cone_relint(self.dual_cone(self.NE))
+
+    def Mov(self) -> ConvexRationalPolyhedralCone:
+        '''
+        return the movable cone of self
+        '''
+        return self.NE.intersection(self.Ample)
+
+
+    def canonical_label(self) -> Graph:
+        '''
+        Return the canonical label of the incidence graph of the Mori cone generators
+
+        This works as the identifier of the combinatorial type of self 
+
+        TESTS:
+            >>> Surface(5,[[0,1,-1,0,0], [0,0,0,1,-1]]).canonical_label.edges()
+            [(0, 0, -2), (0, 5, 1), (0, 6, 1), (4, 4, -2), (1, 4, 1), (4, 6, 1), (5, 5, -1), (3, 5, 1), (1, 1, -1), (1, 2, 1), (3, 3, -1), (2, 3, 1), (6, 6, -1), (2, 2, -1)]
+            >>> Surface(5,[[0,1,-1,0,0], [0,0,0,1,-1]]).canonical_label.edges()
+            >>> Surface.Hirzebruch(0).canonical_label.edges()
+            [(0, 1, None)]
+            >>> Surface.Hirzebruch(1).canonical_label.edges()
+            [(0, 1, 1), (1, 1, -1)]
+            >>> Surface.Hirzebruch(2).canonical_label.edges()
+            [(0, 1, 1), (1, 1, -2)]
+        '''
+        adjacency_matrix = Matrix([[self.dot(a,b) for b in self.NE_gens] for a in self.NE_gens])
+        return Graph(adjacency_matrix).canonical_label(immutable=True)
+
+    @cached_property
+    def label(self) -> SurfaceLabel:
+        '''
+        return a label of this surface as a tuple of the degree and a sparse6 string representation of the canonical label graph
+        
+        TESTS:
+            >>> Surface.Hirzebruch(2).label == Surface.Hirzebruch(1).label 
+            False
+            >>> Surface.Hirzebruch(2).label == Surface.Hirzebruch(2).label 
+            True
+        '''
+        return self.degree, self.canonical_label().sparse6_string(), sum(sorted(self.dot(c,c) for c in self.NE_gens))
+    # had to add sum of negativities since hash((-1,0))==hash((-2,0))
 
     @cache
     def singularity_type(self) -> tuple[str,...]:
